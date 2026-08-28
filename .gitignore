@@ -1,0 +1,32 @@
+# ===== 前端依赖与构建产物 =====
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# ===== Go 后端构建产物 =====
+backend/web/dist/
+backend/server.exe
+backend/transmission-manager
+backend/transmission-manager.exe
+
+# ===== 开发服务器运行时产物（统一目录 dev/） =====
+dev/
+
+# ===== 运行时日志兜底（防止散落代码目录） =====
+*.log
+
+# ===== 本地配置（密钥类） =====
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.local
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+
+# ===== OS =====
+.DS_Store
+Thumbs.db

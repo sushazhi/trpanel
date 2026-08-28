@@ -1,0 +1,9 @@
+# Transmission 连接配置
+tr_url: "http://localhost:9091/transmission/rpc"
+tr_user: "admin"
+tr_pass: "password"
+
+# 服务配置
+server_port: 8080
+poll_interval: "2s"
+log_level: "info"

@@ -1,0 +1,669 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	trpc "github.com/hekmon/transmissionrpc/v3"
+)
+
+// maxTorrentFileSize 上传种子文件大小上限（10MB）
+const maxTorrentFileSize = 10 << 20
+
+// getIDParam 解析路径中的 :id
+func getIDParam(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "无效的种子 ID")
+		return 0, false
+	}
+	return id, true
+}
+
+// parseCSV 解析逗号分隔的字符串（multipart 表单中的标签字段）
+func parseCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(part); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// torrentSites 获取每个种子的 Tracker 站点（站点过滤维度）
+func (h *Handler) torrentSites(c *gin.Context) {
+	sites, err := h.rpc.Client().GetTorrentSites(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "获取站点列表失败: "+err.Error())
+		return
+	}
+	respond(c, sites)
+}
+
+// replaceTracker 批量替换/追加所有匹配种子的 Tracker 地址
+func (h *Handler) replaceTracker(c *gin.Context) {
+	defer h.hub.Bump()
+	var body struct {
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Append bool   `json:"append"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效")
+		return
+	}
+	if body.From == "" || body.To == "" {
+		respondError(c, http.StatusBadRequest, "查找地址与替换地址不能为空")
+		return
+	}
+	affected, names, err := h.rpc.Client().ReplaceTracker(c.Request.Context(), body.From, body.To, body.Append)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "替换 Tracker 失败: "+err.Error())
+		return
+	}
+	respond(c, gin.H{"affected": affected, "names": names})
+}
+
+// listTorrents 获取种子列表
+func (h *Handler) listTorrents(c *gin.Context) {
+	torrents, err := h.rpc.Client().GetTorrents(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "获取种子列表失败: "+err.Error())
+		return
+	}
+	respond(c, torrents)
+}
+
+// getTorrent 获取单个种子详情（含文件/Peers/Trackers）
+func (h *Handler) getTorrent(c *gin.Context) {
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	t, err := h.rpc.Client().GetTorrentDetail(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	respond(c, t)
+}
+
+// addTorrent 添加种子（multipart 文件上传 或 JSON url/magnet）
+func (h *Handler) addTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	ctx := c.Request.Context()
+
+	// 方式一：multipart 文件上传
+	if fileHeader, err := c.FormFile("file"); err == nil {
+		if fileHeader.Size > maxTorrentFileSize {
+			respondError(c, http.StatusBadRequest, "种子文件过大（上限 10MB）")
+			return
+		}
+		f, err := fileHeader.Open()
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "读取上传文件失败: "+err.Error())
+			return
+		}
+		defer f.Close()
+		data, err := io.ReadAll(io.LimitReader(f, maxTorrentFileSize))
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "读取上传文件失败: "+err.Error())
+			return
+		}
+		downloadDir := c.PostForm("downloadDir")
+		paused := c.PostForm("paused") == "true"
+		verify := c.PostForm("verify") == "true"
+		labels := parseCSV(c.PostForm("labels"))
+		var priority *int64
+		if v, err := strconv.ParseInt(c.PostForm("bandwidthPriority"), 10, 64); err == nil {
+			priority = &v
+		}
+		// 文件选择：JSON 数组索引（不传=全部下载）
+		var filesWanted, filesUnwanted []int64
+		if raw := c.PostForm("filesWanted"); raw != "" {
+			_ = json.Unmarshal([]byte(raw), &filesWanted)
+		}
+		if raw := c.PostForm("filesUnwanted"); raw != "" {
+			_ = json.Unmarshal([]byte(raw), &filesUnwanted)
+		}
+		id, err := h.rpc.Client().AddTorrentByFile(ctx, data, downloadDir, paused, labels, priority, filesWanted, filesUnwanted)
+		if err != nil {
+			respondError(c, http.StatusBadGateway, "添加种子失败: "+err.Error())
+			return
+		}
+		if verify {
+			if err := h.rpc.Client().VerifyTorrents(ctx, []int64{id}); err != nil {
+				respondError(c, http.StatusBadGateway, "校验种子失败: "+err.Error())
+				return
+			}
+		}
+		respond(c, gin.H{"id": id})
+		return
+	}
+
+	// 方式二：JSON 提供 URL 或磁力链接
+	var body struct {
+		URL               string   `json:"url"`
+		Magnet            string   `json:"magnet"`
+		DownloadDir       string   `json:"downloadDir"`
+		Paused            bool     `json:"paused"`
+		Verify            bool     `json:"verify"`
+		Labels            []string `json:"labels"`
+		BandwidthPriority *int64   `json:"bandwidthPriority"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效，需要 multipart 文件或 JSON {url|magnet}")
+		return
+	}
+	link := body.URL
+	if link == "" {
+		link = body.Magnet
+	}
+	if link == "" {
+		respondError(c, http.StatusBadRequest, "缺少 URL 或磁力链接")
+		return
+	}
+	id, err := h.rpc.Client().AddTorrentByURL(ctx, link, body.DownloadDir, body.Paused, body.Labels, body.BandwidthPriority)
+	if err != nil {
+		respondError(c, http.StatusBadGateway, "添加种子失败: "+err.Error())
+		return
+	}
+	if body.Verify {
+		if err := h.rpc.Client().VerifyTorrents(ctx, []int64{id}); err != nil {
+			respondError(c, http.StatusBadGateway, "校验种子失败: "+err.Error())
+			return
+		}
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// addTorrentBatch 批量添加多个URL/磁力链接
+func (h *Handler) addTorrentBatch(c *gin.Context) {
+	defer h.hub.Bump()
+	ctx := c.Request.Context()
+	var body struct {
+		URLs              []string `json:"urls"`
+		DownloadDir       string   `json:"downloadDir"`
+		Paused            bool     `json:"paused"`
+		Verify            bool     `json:"verify"`
+		Labels            []string `json:"labels"`
+		BandwidthPriority *int64   `json:"bandwidthPriority"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效")
+		return
+	}
+	if len(body.URLs) == 0 {
+		respondError(c, http.StatusBadRequest, "urls 不能为空")
+		return
+	}
+	ids := make([]int64, 0, len(body.URLs))
+	for _, url := range body.URLs {
+		id, err := h.rpc.Client().AddTorrentByURL(ctx, url, body.DownloadDir, body.Paused, body.Labels, body.BandwidthPriority)
+		if err != nil {
+			respondError(c, http.StatusBadGateway, "添加失败: "+err.Error())
+			return
+		}
+		ids = append(ids, id)
+	}
+	if body.Verify && len(ids) > 0 {
+		if err := h.rpc.Client().VerifyTorrents(ctx, ids); err != nil {
+			respondError(c, http.StatusBadGateway, "校验种子失败: "+err.Error())
+			return
+		}
+	}
+	respond(c, gin.H{"ids": ids})
+}
+
+// startTorrent 启动单个种子
+func (h *Handler) startTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	if err := h.rpc.Client().StartTorrents(c.Request.Context(), []int64{id}); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// startNowTorrent 强制立即开始单个种子
+func (h *Handler) startNowTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	if err := h.rpc.Client().StartTorrentsNow(c.Request.Context(), []int64{id}); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// stopTorrent 暂停单个种子
+func (h *Handler) stopTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	if err := h.rpc.Client().StopTorrents(c.Request.Context(), []int64{id}); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// verifyTorrent 校验单个种子
+func (h *Handler) verifyTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	if err := h.rpc.Client().VerifyTorrents(c.Request.Context(), []int64{id}); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// reannounceTorrent 重新宣告 Tracker
+func (h *Handler) reannounceTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	if err := h.rpc.Client().ReannounceTorrents(c.Request.Context(), []int64{id}); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// renameTorrent 重命名种子文件或目录
+func (h *Handler) renameTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效")
+		return
+	}
+	if body.Name == "" {
+		respondError(c, http.StatusBadRequest, "缺少新的名称")
+		return
+	}
+	if err := h.rpc.Client().RenameFile(c.Request.Context(), id, body.Path, body.Name); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// moveTorrent 移动种子下载位置
+func (h *Handler) moveTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	var body struct {
+		Location string `json:"location"`
+		Move     *bool  `json:"move"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效")
+		return
+	}
+	if body.Location == "" {
+		respondError(c, http.StatusBadRequest, "缺少 location")
+		return
+	}
+	move := true
+	if body.Move != nil {
+		move = *body.Move
+	}
+	if err := h.rpc.Client().SetTorrentLocation(c.Request.Context(), id, body.Location, move); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// queueMove 调整队列位置
+func (h *Handler) queueMove(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	var body struct {
+		Direction string `json:"direction"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效")
+		return
+	}
+	if err := h.rpc.Client().QueueMove(c.Request.Context(), []int64{id}, body.Direction); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// torrentUpdateBody 种子属性修改请求体（单条/批量共用）
+type torrentUpdateBody struct {
+	Location            *string  `json:"location"`
+	Move                *bool    `json:"move"`
+	SequentialDownload  *bool    `json:"sequentialDownload"`
+	Labels              []string `json:"labels"`
+	BandwidthPriority   *int64   `json:"bandwidthPriority"`
+	TrackerList         []string `json:"trackerList"`
+	DownloadLimit       *int64   `json:"downloadLimit"`
+	DownloadLimited     *bool    `json:"downloadLimited"`
+	UploadLimit         *int64   `json:"uploadLimit"`
+	UploadLimited       *bool    `json:"uploadLimited"`
+	HonorsSessionLimits *bool    `json:"honorsSessionLimits"`
+	PeerLimit           *int64   `json:"peerLimit"`
+	SeedRatioLimit      *float64 `json:"seedRatioLimit"`
+	SeedRatioMode       *int64   `json:"seedRatioMode"`
+	QueuePosition       *int64   `json:"queuePosition"`
+	FilesWanted         []int64  `json:"filesWanted"`
+	FilesUnwanted       []int64  `json:"filesUnwanted"`
+	PriorityHigh        []int64  `json:"priorityHigh"`
+	PriorityLow         []int64  `json:"priorityLow"`
+	PriorityNormal      []int64  `json:"priorityNormal"`
+	SeedIdleMode        *int64   `json:"seedIdleMode"`
+	SeedIdleLimit       *int64   `json:"seedIdleLimit"`
+}
+
+// buildTorrentSetPayload 将请求体转换为 torrent-set 负载
+func buildTorrentSetPayload(body *torrentUpdateBody) trpc.TorrentSetPayload {
+	payload := trpc.TorrentSetPayload{
+		Labels:              body.Labels,
+		BandwidthPriority:   body.BandwidthPriority,
+		TrackerList:         body.TrackerList,
+		DownloadLimit:       body.DownloadLimit,
+		DownloadLimited:     body.DownloadLimited,
+		UploadLimit:         body.UploadLimit,
+		UploadLimited:       body.UploadLimited,
+		HonorsSessionLimits: body.HonorsSessionLimits,
+		PeerLimit:           body.PeerLimit,
+		SeedRatioLimit:      body.SeedRatioLimit,
+		QueuePosition:       body.QueuePosition,
+		FilesWanted:         body.FilesWanted,
+		FilesUnwanted:       body.FilesUnwanted,
+		PriorityHigh:        body.PriorityHigh,
+		PriorityLow:         body.PriorityLow,
+		PriorityNormal:      body.PriorityNormal,
+		SeedIdleMode:        body.SeedIdleMode,
+	}
+	if body.SeedIdleLimit != nil {
+		d := time.Duration(*body.SeedIdleLimit) * time.Minute
+		payload.SeedIdleLimit = &d
+	}
+	if body.SeedRatioMode != nil {
+		srm := trpc.SeedRatioMode(*body.SeedRatioMode)
+		payload.SeedRatioMode = &srm
+	}
+	return payload
+}
+
+// applyRawFields 应用库未实现的字段（sequentialDownload / tags）
+func (h *Handler) applyRawFields(ctx context.Context, ids []int64, body *torrentUpdateBody) error {
+	raw := map[string]any{}
+	if body.SequentialDownload != nil {
+		raw["sequentialDownload"] = *body.SequentialDownload
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	return h.rpc.Client().SetTorrentRawFields(ctx, ids, raw)
+}
+
+// updateTorrent 修改单个种子属性（路径/标签/优先级/Tracker/限速等）
+func (h *Handler) updateTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	var body torrentUpdateBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
+		return
+	}
+	// 若同时提供 location 且未单独走 move 接口，则移动位置
+	if body.Location != nil {
+		move := true
+		if body.Move != nil {
+			move = *body.Move
+		}
+		if err := h.rpc.Client().SetTorrentLocation(c.Request.Context(), id, *body.Location, move); err != nil {
+			respondError(c, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	if err := h.rpc.Client().SetTorrent(c.Request.Context(), []int64{id}, buildTorrentSetPayload(&body)); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := h.applyRawFields(c.Request.Context(), []int64{id}, &body); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// updateTorrents 批量修改种子属性
+func (h *Handler) updateTorrents(c *gin.Context) {
+	defer h.hub.Bump()
+	var body struct {
+		IDs []int64 `json:"ids"`
+		torrentUpdateBody
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
+		return
+	}
+	if len(body.IDs) == 0 {
+		respondError(c, http.StatusBadRequest, "缺少 ids")
+		return
+	}
+	if body.Location != nil {
+		move := true
+		if body.Move != nil {
+			move = *body.Move
+		}
+		for _, id := range body.IDs {
+			if err := h.rpc.Client().SetTorrentLocation(c.Request.Context(), id, *body.Location, move); err != nil {
+				respondError(c, http.StatusBadGateway, err.Error())
+				return
+			}
+		}
+	}
+	if err := h.rpc.Client().SetTorrent(c.Request.Context(), body.IDs, buildTorrentSetPayload(&body.torrentUpdateBody)); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := h.applyRawFields(c.Request.Context(), body.IDs, &body.torrentUpdateBody); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"ids": body.IDs})
+}
+
+// moveTorrents 批量移动种子下载位置
+func (h *Handler) moveTorrents(c *gin.Context) {
+	defer h.hub.Bump()
+	var body struct {
+		IDs      []int64 `json:"ids"`
+		Location string  `json:"location"`
+		Move     *bool   `json:"move"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效")
+		return
+	}
+	if len(body.IDs) == 0 {
+		respondError(c, http.StatusBadRequest, "缺少 ids")
+		return
+	}
+	if body.Location == "" {
+		respondError(c, http.StatusBadRequest, "缺少 location")
+		return
+	}
+	move := true
+	if body.Move != nil {
+		move = *body.Move
+	}
+	for _, id := range body.IDs {
+		if err := h.rpc.Client().SetTorrentLocation(c.Request.Context(), id, body.Location, move); err != nil {
+			respondError(c, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	respond(c, gin.H{"ids": body.IDs})
+}
+
+// deleteTorrent 删除单个种子（query: deleteData=true 同时删除本地数据）
+func (h *Handler) deleteTorrent(c *gin.Context) {
+	defer h.hub.Bump()
+	id, ok := getIDParam(c)
+	if !ok {
+		return
+	}
+	deleteData := c.Query("deleteData") == "true"
+	if err := h.rpc.Client().RemoveTorrents(c.Request.Context(), []int64{id}, deleteData); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"id": id})
+}
+
+// parseIDsBody 解析批量操作的 ids 请求体
+func parseIDsBody(c *gin.Context) ([]int64, bool) {
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
+		return nil, false
+	}
+	if len(body.IDs) == 0 {
+		respondError(c, http.StatusBadRequest, "缺少 ids")
+		return nil, false
+	}
+	return body.IDs, true
+}
+
+// startTorrents 批量启动
+func (h *Handler) startTorrents(c *gin.Context) {
+	ids, ok := parseIDsBody(c)
+	if !ok {
+		return
+	}
+	if err := h.rpc.Client().StartTorrents(c.Request.Context(), ids); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"ids": ids})
+}
+
+// startNowTorrents 批量强制立即开始
+func (h *Handler) startNowTorrents(c *gin.Context) {
+	defer h.hub.Bump()
+	ids, ok := parseIDsBody(c)
+	if !ok {
+		return
+	}
+	if err := h.rpc.Client().StartTorrentsNow(c.Request.Context(), ids); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"ids": ids})
+}
+
+// stopTorrents 批量暂停
+func (h *Handler) stopTorrents(c *gin.Context) {
+	defer h.hub.Bump()
+	ids, ok := parseIDsBody(c)
+	if !ok {
+		return
+	}
+	if err := h.rpc.Client().StopTorrents(c.Request.Context(), ids); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"ids": ids})
+}
+
+// deleteTorrents 批量删除（可同时删除本地数据）
+func (h *Handler) deleteTorrents(c *gin.Context) {
+	defer h.hub.Bump()
+	var body struct {
+		IDs        []int64 `json:"ids"`
+		DeleteData bool    `json:"deleteData"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
+		return
+	}
+	if len(body.IDs) == 0 {
+		respondError(c, http.StatusBadRequest, "缺少 ids")
+		return
+	}
+	if err := h.rpc.Client().RemoveTorrents(c.Request.Context(), body.IDs, body.DeleteData); err != nil {
+		respondError(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	respond(c, gin.H{"ids": body.IDs})
+}
+
+// startAllTorrents 批量启动所有种子（传入空 ids 表示全部）
+func (h *Handler) startAllTorrents(c *gin.Context) {
+	defer h.hub.Bump()
+	if err := h.rpc.Client().StartTorrents(c.Request.Context(), []int64{}); err != nil {
+		respondError(c, http.StatusBadGateway, "启动失败: "+err.Error())
+		return
+	}
+	respond(c, gin.H{})
+}
+
+// pauseAllTorrents 批量暂停所有种子（传入空 ids 表示全部）
+func (h *Handler) pauseAllTorrents(c *gin.Context) {
+	defer h.hub.Bump()
+	if err := h.rpc.Client().StopTorrents(c.Request.Context(), []int64{}); err != nil {
+		respondError(c, http.StatusBadGateway, "暂停失败: "+err.Error())
+		return
+	}
+	respond(c, gin.H{})
+}
+
+// reannounceAllTorrents 对所有种子重新宣告 Tracker
+func (h *Handler) reannounceAllTorrents(c *gin.Context) {
+	defer h.hub.Bump()
+	if err := h.rpc.Client().ReannounceTorrents(c.Request.Context(), []int64{}); err != nil {
+		respondError(c, http.StatusBadGateway, "重新宣告失败: "+err.Error())
+		return
+	}
+	respond(c, gin.H{})
+}

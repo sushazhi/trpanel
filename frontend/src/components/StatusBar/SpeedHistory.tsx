@@ -1,0 +1,67 @@
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useAppStore } from '@/stores/appStore'
+import { formatSpeed } from '@/utils/format'
+
+const MAX_POINTS = 60
+const W = 280
+const H = 90
+
+// 全局速度历史折线图（SVG 无依赖实现）
+export function SpeedHistory() {
+  const { t } = useTranslation()
+  const [points, setPoints] = useState<{ down: number; up: number }[]>([])
+
+  useEffect(() => {
+    const push = () => {
+      const { torrents } = useAppStore.getState()
+      let down = 0
+      let up = 0
+      torrents.forEach((x) => {
+        down += x.rateDownload
+        up += x.rateUpload
+      })
+      setPoints((prev) => [...prev.slice(-(MAX_POINTS - 1)), { down, up }])
+    }
+    push()
+    const iv = window.setInterval(push, 2000)
+    return () => window.clearInterval(iv)
+  }, [])
+
+  if (points.length < 2) {
+    return <div className="text-footnote text-gray-400 py-6 text-center">{t('common.loading')}</div>
+  }
+
+  const max = Math.max(1, ...points.map((p) => Math.max(p.down, p.up)))
+  const toPath = (key: 'down' | 'up') =>
+    points
+      .map((p, i) => {
+        const x = (i / (points.length - 1)) * W
+        const y = H - (p[key] / max) * (H - 8) - 4
+        return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+      })
+      .join(' ')
+
+  const last = points[points.length - 1]
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="none">
+        {/* 网格线 */}
+        {[0.25, 0.5, 0.75].map((r) => (
+          <line key={r} x1="0" y1={H * r} x2={W} y2={H * r} stroke="rgba(128,128,128,0.15)" strokeWidth="1" />
+        ))}
+        <path d={toPath('down')} fill="none" stroke="#16a34a" strokeWidth="2" strokeLinejoin="round" />
+        <path d={toPath('up')} fill="none" stroke="#2563eb" strokeWidth="2" strokeLinejoin="round" />
+      </svg>
+      <div className="flex justify-between text-footnote mt-1">
+        <span className="text-green-600 dark:text-green-400">
+          ↓ {formatSpeed(last.down)} / {t('columns.download')}
+        </span>
+        <span className="text-blue-600 dark:text-blue-400">
+          ↑ {formatSpeed(last.up)} / {t('columns.upload')}
+        </span>
+      </div>
+    </div>
+  )
+}

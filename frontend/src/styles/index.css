@@ -1,0 +1,679 @@
+@import 'tailwindcss';
+
+@variant dark (&:where(.dark, .dark *));
+
+/* ===================== Design Tokens (Liquid Glass · Transmission WebUI for fnOS) ===================== */
+:root {
+  /* Brand accent — iOS blue #007AFF */
+  --color-primary: #007aff;
+  --color-primary-soft: #3395ff;
+  --color-primary-foreground: #ffffff;
+
+  /* macOS system grays */
+  --color-gray-50: #fafafa;
+  --color-gray-100: #f5f5f7;
+  --color-gray-200: #e8e8ed;
+  --color-gray-300: #d1d1d6;
+  --color-gray-400: #aeaeb2;
+  --color-gray-500: #8e8e93;
+  --color-gray-600: #6e6e73;
+  --color-gray-700: #48484a;
+  --color-gray-800: #3a3a3c;
+  --color-gray-900: #2c2c2e;
+  --color-gray-950: #1d1d1f;
+
+  /* Semantic system colors (Apple HIG) */
+  --color-background: #eef1fb;
+  --color-foreground: #1d1d1f;
+  --color-card: rgba(255, 255, 255, 0.6);
+  --color-card-foreground: #1d1d1f;
+  --color-popover: rgba(255, 255, 255, 0.85);
+  --color-popover-foreground: #1d1d1f;
+  --color-secondary: #e8e8ed;
+  --color-secondary-foreground: #1d1d1f;
+  --color-muted: #eef0f6;
+  --color-muted-foreground: #6e6e73;
+  --color-accent: rgba(0, 122, 255, 0.12);
+  --color-accent-foreground: #0062d6;
+  --color-border: #d1d1d6;
+  --color-input: #d1d1d6;
+  --color-ring: #007aff;
+
+  /* iOS status palette */
+  --color-green-50: #e9f9ee;
+  --color-green-100: #c9f2d5;
+  --color-green-200: #9be7b2;
+  --color-green-300: #68d98d;
+  --color-green-400: #45c970;
+  --color-green-500: #34c759;
+  --color-green-600: #25a847;
+  --color-green-700: #1d8739;
+  --color-green-800: #1a6d30;
+  --color-green-900: #165927;
+
+  --color-blue-50: #e8f2ff;
+  --color-blue-100: #cfe3ff;
+  --color-blue-200: #a3caff;
+  --color-blue-300: #6da8ff;
+  --color-blue-400: #3b85ff;
+  --color-blue-500: #007aff;
+  --color-blue-600: #0062d6;
+  --color-blue-700: #0050ad;
+  --color-blue-800: #05417f;
+  --color-blue-900: #0a3868;
+
+  /* Coral (error) — iOS system red #FF3B30 */
+  --color-red-50: #fdeaec;
+  --color-red-100: #fbd3d7;
+  --color-red-200: #f7a6ad;
+  --color-red-300: #f2737e;
+  --color-red-400: #f04a57;
+  --color-red-500: #ff3b30;
+  --color-red-600: #d6242f;
+  --color-red-700: #b01d27;
+  --color-red-800: #8d1b23;
+  --color-red-900: #741c22;
+
+  /* Amber (warning / seeding) — iOS orange #FF9500 */
+  --color-yellow-50: #fff6e5;
+  --color-yellow-100: #ffe9c2;
+  --color-yellow-200: #ffd488;
+  --color-yellow-300: #ffbb52;
+  --color-yellow-400: #ffa427;
+  --color-yellow-500: #ff9500;
+  --color-yellow-600: #e07f00;
+  --color-yellow-700: #b86500;
+  --color-yellow-800: #965300;
+  --color-yellow-900: #7a4400;
+
+  /* Typography: SF Pro / PingFang system stack */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+    'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'JetBrains Mono', monospace;
+
+  /* Radius scale (Liquid Glass: cards 14-16 / panel 20 / controls 10-12) */
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-panel: 20px;
+
+  /* ===== Liquid Glass material tokens ===== */
+  --glass-blur: 28px;
+  --glass-saturation: 185%;
+  /* 玻璃表面为垂直渐变：顶部较实、底部更透，模拟光学玻璃折射 */
+  --glass-bg-light: linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0.38) 100%);
+  --glass-bg-light-strong: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.86) 100%);
+  --glass-border-light: rgba(255, 255, 255, 0.7);
+  --glass-inner-highlight-light: rgba(255, 255, 255, 0.8);
+  --glass-shadow-light: 0 1px 2px rgba(60, 80, 120, 0.05), 0 4px 16px rgba(60, 80, 120, 0.08),
+    0 14px 44px rgba(60, 80, 120, 0.1);
+  --glass-ring-light: inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+
+  --glass-bg-dark: linear-gradient(180deg, rgba(46, 46, 52, 0.6) 0%, rgba(28, 28, 34, 0.42) 100%);
+  --glass-bg-dark-strong: linear-gradient(180deg, rgba(58, 58, 66, 0.94) 0%, rgba(40, 40, 48, 0.88) 100%);
+  --glass-border-dark: rgba(255, 255, 255, 0.12);
+  --glass-inner-highlight-dark: rgba(255, 255, 255, 0.1);
+  --glass-shadow-dark: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35),
+    0 24px 64px rgba(0, 0, 0, 0.4);
+  --glass-ring-dark: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+
+  /* ===== 品牌渐变与应用背景大气层（预设主题覆盖）===== */
+  --brand-grad-from: #007aff;
+  --brand-grad-to: #5ac8fa;
+  --glow-primary: rgba(120, 170, 255, 0.34);
+  --glow-secondary: rgba(195, 165, 255, 0.3);
+  --glow-pink: rgba(255, 175, 200, 0.16);
+  --glow-cyan: rgba(150, 215, 255, 0.2);
+  --bg-top: #ddeaff;
+  --bg-mid: #ece9ff;
+  --bg-bot: #e4def6;
+  --glow-primary-dark: rgba(60, 110, 200, 0.28);
+  --glow-secondary-dark: rgba(120, 90, 190, 0.22);
+  --bg-dark-top: #1c1d29;
+  --bg-dark-mid: #1a1a22;
+  --bg-dark-bot: #17161f;
+
+  /* Motion (Apple HIG + spring) */
+  --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@theme {
+  --color-primary: #007aff;
+  --color-primary-soft: #3395ff;
+  --color-primary-foreground: #ffffff;
+
+  --color-gray-50: #fafafa;
+  --color-gray-100: #f5f5f7;
+  --color-gray-200: #e8e8ed;
+  --color-gray-300: #d1d1d6;
+  --color-gray-400: #aeaeb2;
+  --color-gray-500: #8e8e93;
+  --color-gray-600: #6e6e73;
+  --color-gray-700: #48484a;
+  --color-gray-800: #3a3a3c;
+  --color-gray-900: #2c2c2e;
+  --color-gray-950: #1d1d1f;
+
+  --color-background: #eef1fb;
+  --color-foreground: #1d1d1f;
+  --color-card: rgba(255, 255, 255, 0.6);
+  --color-card-foreground: #1d1d1f;
+  --color-popover: rgba(255, 255, 255, 0.85);
+  --color-popover-foreground: #1d1d1f;
+  --color-secondary: #e8e8ed;
+  --color-secondary-foreground: #1d1d1f;
+  --color-muted: #eef0f6;
+  --color-muted-foreground: #6e6e73;
+  --color-accent: rgba(0, 122, 255, 0.12);
+  --color-accent-foreground: #0062d6;
+  --color-border: #d1d1d6;
+  --color-input: #d1d1d6;
+  --color-ring: #007aff;
+
+  --color-green-50: #e9f9ee;
+  --color-green-100: #c9f2d5;
+  --color-green-200: #9be7b2;
+  --color-green-300: #68d98d;
+  --color-green-400: #45c970;
+  --color-green-500: #34c759;
+  --color-green-600: #25a847;
+  --color-green-700: #1d8739;
+  --color-green-800: #1a6d30;
+  --color-green-900: #165927;
+
+  --color-blue-50: #e8f2ff;
+  --color-blue-100: #cfe3ff;
+  --color-blue-200: #a3caff;
+  --color-blue-300: #6da8ff;
+  --color-blue-400: #3b85ff;
+  --color-blue-500: #007aff;
+  --color-blue-600: #0062d6;
+  --color-blue-700: #0050ad;
+  --color-blue-800: #05417f;
+  --color-blue-900: #0a3868;
+
+  --color-red-50: #fdeaec;
+  --color-red-100: #fbd3d7;
+  --color-red-200: #f7a6ad;
+  --color-red-300: #f2737e;
+  --color-red-400: #f04a57;
+  --color-red-500: #ff3b30;
+  --color-red-600: #d6242f;
+  --color-red-700: #b01d27;
+  --color-red-800: #8d1b23;
+  --color-red-900: #741c22;
+
+  --color-yellow-50: #fff6e5;
+  --color-yellow-100: #ffe9c2;
+  --color-yellow-200: #ffd488;
+  --color-yellow-300: #ffbb52;
+  --color-yellow-400: #ffa427;
+  --color-yellow-500: #ff9500;
+  --color-yellow-600: #e07f00;
+  --color-yellow-700: #b86500;
+  --color-yellow-800: #965300;
+  --color-yellow-900: #7a4400;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+    'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'JetBrains Mono', monospace;
+
+  /* Apple HIG 语义化字号刻度（rem 基准，随"字体大小"设置全局缩放） */
+  --text-caption2: 0.625rem; /* 10px */
+  --text-caption2--line-height: 0.8125rem;
+  --text-caption1: 0.6875rem; /* 11px */
+  --text-caption1--line-height: 0.875rem;
+  --text-footnote: 0.75rem; /* 12px */
+  --text-footnote--line-height: 1rem;
+  --text-body: 0.8125rem; /* 13px */
+  --text-body--line-height: 1.125rem;
+  --text-subhead: 0.9375rem; /* 15px */
+  --text-subhead--line-height: 1.25rem;
+  --text-title2: 1.0625rem; /* 17px */
+  --text-title2--line-height: 1.375rem;
+  --text-title1: 1.25rem; /* 20px */
+  --text-title1--line-height: 1.5625rem;
+
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-panel: 20px;
+}
+
+/* Dark mode overrides (glass turns black translucent) */
+.dark {
+  --color-background: #14141a;
+  --color-foreground: #f5f5f7;
+  --color-card: rgba(40, 40, 48, 0.6);
+  --color-card-foreground: #f5f5f7;
+  --color-popover: rgba(36, 36, 44, 0.92);
+  --color-popover-foreground: #f5f5f7;
+  --color-secondary: #3a3a3c;
+  --color-secondary-foreground: #f5f5f7;
+  --color-muted: #2a2a2e;
+  --color-muted-foreground: #98989d;
+  --color-accent: rgba(0, 122, 255, 0.22);
+  --color-accent-foreground: #66b2ff;
+  --color-border: #3a3a3c;
+  --color-input: #3a3a3c;
+  --color-ring: #007aff;
+}
+
+/* ===================== Base ===================== */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.01em;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* Smooth transitions (Apple standard curve) */
+a,
+button,
+.tm-progress-fill,
+.tm-nav-item,
+input,
+select {
+  transition: background-color 0.25s var(--ease-standard), border-color 0.25s var(--ease-standard),
+    color 0.25s var(--ease-standard), box-shadow 0.25s var(--ease-standard), transform 0.25s var(--ease-standard);
+}
+
+/* Selection */
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  color: inherit;
+}
+
+/* Refined macOS scrollbars: idle 4px / hover 6px, Firefox thin support, wider on touch */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-gray-400) 45%, transparent) transparent;
+}
+.dark * {
+  scrollbar-color: color-mix(in srgb, var(--color-gray-600) 45%, transparent) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+@media (pointer: coarse) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-gray-400) 45%, transparent);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-gray-600) 45%, transparent);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-primary) 60%, transparent);
+  border-width: 1px;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ===================== App background atmosphere (light blue → lavender) ===================== */
+.tm-app-bg {
+  position: relative;
+  z-index: 1;
+  background:
+    radial-gradient(1000px 620px at 12% -8%, var(--glow-primary), transparent 58%),
+    radial-gradient(860px 540px at 92% 2%, var(--glow-secondary), transparent 55%),
+    radial-gradient(720px 520px at 88% 78%, var(--glow-pink), transparent 60%),
+    radial-gradient(640px 460px at 18% 92%, var(--glow-cyan), transparent 60%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 55%, var(--bg-bot) 100%);
+}
+.dark .tm-app-bg {
+  background:
+    radial-gradient(1000px 620px at 12% -8%, var(--glow-primary-dark), transparent 58%),
+    radial-gradient(860px 540px at 92% 2%, var(--glow-secondary-dark), transparent 55%),
+    linear-gradient(180deg, var(--bg-dark-top) 0%, var(--bg-dark-mid) 55%, var(--bg-dark-bot) 100%);
+}
+
+/* ===================== Reusable visuals ===================== */
+/* Gradient progress with glow — transform: scaleX() driven (GPU compositing, no layout) */
+.tm-progress-track {
+  height: 6px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: rgba(120, 130, 160, 0.14);
+}
+.dark .tm-progress-track {
+  background: rgba(255, 255, 255, 0.12);
+}
+.tm-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, var(--color-primary-soft), var(--color-primary));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 45%, transparent);
+  transform-origin: left center;
+  transition: transform 0.5s var(--ease-spring);
+}
+.tm-progress-fill--error {
+  background: linear-gradient(90deg, #ff6b61, #ff3b30);
+  box-shadow: 0 0 8px rgba(255, 59, 48, 0.4);
+}
+
+/* Metric numerics */
+.tm-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Elevation surface */
+.tm-surface {
+  background: var(--color-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+}
+
+/* ===================== Liquid Glass materials ===================== */
+/* Light mode glass surfaces */
+.glass-panel {
+  background: var(--glass-bg-light);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border: 1px solid var(--glass-border-light);
+  box-shadow: var(--glass-shadow-light), var(--glass-ring-light);
+}
+
+.glass-panel-strong {
+  background: var(--glass-bg-light-strong);
+  backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(200%);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(200%);
+  border: 1px solid var(--glass-border-light);
+  box-shadow: var(--glass-shadow-light), var(--glass-ring-light);
+}
+
+/* Glass card (torrent cards, hover lift 1-2%) */
+.glass-card {
+  background: var(--glass-bg-light);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border: 1px solid var(--glass-border-light);
+  box-shadow: var(--glass-shadow-light), var(--glass-ring-light);
+  border-radius: var(--radius-lg);
+  transition: transform 0.35s var(--ease-spring), box-shadow 0.35s var(--ease-standard),
+    background 0.25s var(--ease-standard), border-color 0.25s var(--ease-standard);
+}
+.glass-card:hover {
+  transform: translateY(-2px) scale(1.01);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.55) 100%);
+  box-shadow: 0 2px 6px rgba(60, 80, 120, 0.09), 0 14px 36px rgba(60, 80, 120, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Dark mode glass surfaces */
+.dark .glass-panel {
+  background: var(--glass-bg-dark);
+  border-color: var(--glass-border-dark);
+  box-shadow: var(--glass-shadow-dark), var(--glass-ring-dark);
+}
+
+.dark .glass-panel-strong {
+  background: var(--glass-bg-dark-strong);
+  border-color: var(--glass-border-dark);
+  box-shadow: var(--glass-shadow-dark), var(--glass-ring-dark);
+}
+
+.dark .glass-card {
+  background: var(--glass-bg-dark);
+  border-color: var(--glass-border-dark);
+  box-shadow: var(--glass-shadow-dark), var(--glass-ring-dark);
+}
+.dark .glass-card:hover {
+  background: linear-gradient(180deg, rgba(58, 58, 66, 0.78) 0%, rgba(40, 40, 48, 0.6) 100%);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 14px 36px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Soft hover lift effect */
+.glass-hover {
+  transition: background 0.25s var(--ease-standard), border-color 0.25s var(--ease-standard),
+    box-shadow 0.25s var(--ease-standard), transform 0.15s var(--ease-standard);
+}
+.glass-hover:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(255, 255, 255, 0.5) 100%);
+  border-color: rgba(255, 255, 255, 0.85);
+}
+.dark .glass-hover:hover {
+  background: linear-gradient(180deg, rgba(58, 58, 66, 0.72) 0%, rgba(40, 40, 48, 0.56) 100%);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+/* ===================== Touch adaptation ===================== */
+/* 鼠标设备：checkbox 默认隐藏、悬停显示；触屏设备（无 hover / 粗指针）：常显 */
+.tm-reveal-hover {
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-standard);
+}
+.group:hover .tm-reveal-hover {
+  opacity: 1;
+}
+/* ⋮ 菜单按钮：触屏设备显示，鼠标设备隐藏（右键菜单可用） */
+.tm-touch-menu {
+  display: none;
+}
+@media (hover: none), (pointer: coarse) {
+  .tm-reveal-hover {
+    opacity: 1;
+  }
+  .tm-touch-menu {
+    display: flex;
+  }
+}
+
+/* 触屏基础：点击无闪烁高亮、长按不弹系统菜单（长按卡片走自定义右键菜单）、界面元素不误选中 */
+.tm-app-bg * {
+  -webkit-tap-highlight-color: transparent;
+}
+.tm-app-bg .glass-card,
+.tm-app-bg .tm-nav-item,
+.tm-app-bg button {
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+/* ===================== macOS style primary button ===================== */
+.tm-btn-primary {
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+.tm-btn-primary:hover {
+  background: color-mix(in srgb, var(--color-primary) 88%, black);
+}
+.tm-btn-primary:active {
+  background: color-mix(in srgb, var(--color-primary) 78%, black);
+}
+
+/* ===================== 预设主题（html[data-theme='x']） ===================== */
+/* 每个主题覆盖主色、品牌渐变与应用背景；blue 为默认主题，直接使用 :root/.dark 的初始令牌 */
+html[data-theme='green'] {
+  --color-primary: #34c759;
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 78%, white);
+  --color-accent: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 72%, black);
+  --color-ring: var(--color-primary);
+  --brand-grad-from: #34c759;
+  --brand-grad-to: #30d158;
+  --glow-primary: rgba(96, 215, 130, 0.32);
+  --glow-secondary: rgba(170, 240, 190, 0.26);
+  --glow-pink: rgba(255, 225, 180, 0.14);
+  --glow-cyan: rgba(140, 235, 205, 0.18);
+  --bg-top: #ddf5e8;
+  --bg-mid: #e8f2e4;
+  --bg-bot: #dfeee0;
+}
+html[data-theme='green'].dark {
+  --color-accent: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 60%, white);
+  --glow-primary-dark: rgba(50, 190, 110, 0.24);
+  --glow-secondary-dark: rgba(100, 220, 160, 0.18);
+  --bg-dark-top: #16251d;
+  --bg-dark-mid: #161f1a;
+  --bg-dark-bot: #121a15;
+}
+
+html[data-theme='purple'] {
+  --color-primary: #af52de;
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 78%, white);
+  --color-accent: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 72%, black);
+  --color-ring: var(--color-primary);
+  --brand-grad-from: #af52de;
+  --brand-grad-to: #7d5fff;
+  --glow-primary: rgba(190, 120, 240, 0.3);
+  --glow-secondary: rgba(150, 120, 255, 0.26);
+  --glow-pink: rgba(255, 170, 220, 0.16);
+  --glow-cyan: rgba(160, 180, 255, 0.16);
+  --bg-top: #ece4fb;
+  --bg-mid: #efe9f8;
+  --bg-bot: #e7e0f5;
+}
+html[data-theme='purple'].dark {
+  --color-accent: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 60%, white);
+  --glow-primary-dark: rgba(150, 80, 220, 0.26);
+  --glow-secondary-dark: rgba(120, 90, 255, 0.2);
+  --bg-dark-top: #221b2e;
+  --bg-dark-mid: #1d1926;
+  --bg-dark-bot: #181522;
+}
+
+html[data-theme='orange'] {
+  --color-primary: #ff9500;
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 78%, white);
+  --color-accent: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 72%, black);
+  --color-ring: var(--color-primary);
+  --brand-grad-from: #ff9500;
+  --brand-grad-to: #ffb340;
+  --glow-primary: rgba(255, 170, 60, 0.3);
+  --glow-secondary: rgba(255, 200, 120, 0.24);
+  --glow-pink: rgba(255, 190, 160, 0.16);
+  --glow-cyan: rgba(255, 220, 160, 0.2);
+  --bg-top: #ffeddb;
+  --bg-mid: #fcf0e2;
+  --bg-bot: #f6ead9;
+}
+html[data-theme='orange'].dark {
+  --color-accent: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 60%, white);
+  --glow-primary-dark: rgba(255, 140, 0, 0.24);
+  --glow-secondary-dark: rgba(255, 180, 80, 0.16);
+  --bg-dark-top: #2a2015;
+  --bg-dark-mid: #241d15;
+  --bg-dark-bot: #1e1912;
+}
+
+html[data-theme='pink'] {
+  --color-primary: #ff2d55;
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 78%, white);
+  --color-accent: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 72%, black);
+  --color-ring: var(--color-primary);
+  --brand-grad-from: #ff2d55;
+  --brand-grad-to: #ff5e8a;
+  --glow-primary: rgba(255, 110, 140, 0.26);
+  --glow-secondary: rgba(255, 150, 190, 0.22);
+  --glow-pink: rgba(255, 140, 180, 0.18);
+  --glow-cyan: rgba(255, 190, 210, 0.14);
+  --bg-top: #ffe4ea;
+  --bg-mid: #fde9ef;
+  --bg-bot: #f8e2e8;
+}
+html[data-theme='pink'].dark {
+  --color-accent: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 60%, white);
+  --glow-primary-dark: rgba(255, 70, 110, 0.24);
+  --glow-secondary-dark: rgba(255, 120, 160, 0.18);
+  --bg-dark-top: #2a1720;
+  --bg-dark-mid: #241720;
+  --bg-dark-bot: #1e141c;
+}
+
+html[data-theme='teal'] {
+  --color-primary: #30b0c7;
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 78%, white);
+  --color-accent: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 72%, black);
+  --color-ring: var(--color-primary);
+  --brand-grad-from: #30b0c7;
+  --brand-grad-to: #5ac8fa;
+  --glow-primary: rgba(80, 190, 220, 0.28);
+  --glow-secondary: rgba(120, 210, 240, 0.22);
+  --glow-pink: rgba(180, 220, 255, 0.14);
+  --glow-cyan: rgba(130, 225, 245, 0.2);
+  --bg-top: #ddf3f8;
+  --bg-mid: #e6f3f8;
+  --bg-bot: #def0f5;
+}
+html[data-theme='teal'].dark {
+  --color-accent: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 60%, white);
+  --glow-primary-dark: rgba(50, 170, 210, 0.24);
+  --glow-secondary-dark: rgba(80, 190, 235, 0.18);
+  --bg-dark-top: #14242a;
+  --bg-dark-mid: #152027;
+  --bg-dark-bot: #111c22;
+}
+
+html[data-theme='graphite'] {
+  /* HIG：primary 始终保留品牌主色（蓝），graphite 仅改变中性氛围与背景 */
+  --color-primary: #007aff;
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 78%, white);
+  --color-accent: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 72%, black);
+  --color-ring: var(--color-primary);
+  --brand-grad-from: #6e6e73;
+  --brand-grad-to: #aeaeb2;
+  --glow-primary: rgba(140, 145, 155, 0.18);
+  --glow-secondary: rgba(170, 175, 185, 0.16);
+  --glow-pink: rgba(200, 200, 210, 0.12);
+  --glow-cyan: rgba(160, 170, 185, 0.14);
+  --bg-top: #eaecef;
+  --bg-mid: #eff0f2;
+  --bg-bot: #e8e9ec;
+}
+html[data-theme='graphite'].dark {
+  --color-accent: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  --color-accent-foreground: color-mix(in srgb, var(--color-primary) 60%, white);
+  --glow-primary-dark: rgba(120, 125, 135, 0.2);
+  --glow-secondary-dark: rgba(140, 145, 155, 0.14);
+  --bg-dark-top: #1e1f22;
+  --bg-dark-mid: #1b1c1f;
+  --bg-dark-bot: #17181b;
+}

@@ -1,0 +1,358 @@
+import React, { useMemo, useState } from 'react'
+import {
+  Check,
+  FolderInput,
+  Globe,
+  Menu,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  Repeat,
+  RotateCcw,
+  Search,
+  Settings,
+  Tags,
+  Trash2,
+} from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { torrentApi } from '@/api/torrent'
+import { useTorrentActions } from '@/hooks/useTorrentActions'
+import { useAppStore } from '@/stores/appStore'
+import { cn } from '@/lib/utils'
+import { toast } from '@/lib/toast'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ListControls } from '@/components/ListHeader'
+import { BatchMoveDialog, RemoveTorrentDialog } from '@/components/ToolsDialogs'
+
+interface Props {
+  onOpenSettings: () => void
+  onOpenAdd: () => void
+  onOpenDashboard: () => void
+  onOpenLabels: () => void
+  isMobile?: boolean
+  onOpenDrawer?: () => void
+}
+
+// iOS 风格圆形图标按钮：无边框、悬停着色、移动端 44pt 触控目标
+function ToolBtn({ icon: Icon, title, onClick, danger, disabled, large }: {
+  icon: React.ElementType
+  title: string
+  onClick: () => void
+  danger?: boolean
+  disabled?: boolean
+  large?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className={cn(
+        large ? 'h-11 w-11' : 'h-9 w-9',
+        'flex items-center justify-center rounded-full transition-all shrink-0 active:scale-90',
+        disabled
+          ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed active:scale-100'
+          : danger
+            ? 'text-gray-500 dark:text-gray-400 hover:text-red-500 hover:bg-red-500/10'
+            : 'text-gray-500 dark:text-gray-400 hover:text-primary hover:bg-primary/10',
+      )}
+    >
+      <Icon className={large ? 'w-6 h-6' : 'w-5 h-5'} strokeWidth={1.8} />
+    </button>
+  )
+}
+
+// 预设主题（与 index.css 中 html[data-theme='x'] 一一对应）
+const THEME_PRESETS: { id: string; from: string; to: string }[] = [
+  { id: 'blue', from: '#007aff', to: '#8b5cf6' },
+  { id: 'green', from: '#34c759', to: '#30d158' },
+  { id: 'purple', from: '#af52de', to: '#7d5fff' },
+  { id: 'orange', from: '#ff9500', to: '#ffb340' },
+  { id: 'pink', from: '#ff2d55', to: '#ff5e8a' },
+  { id: 'teal', from: '#30b0c7', to: '#5ac8fa' },
+  { id: 'graphite', from: '#6e6e73', to: '#aeaeb2' },
+]
+
+// 玻璃悬浮顶栏：单行 —— Logo + 搜索 + 批量操作（选中时出现在同行）+ 排序/视图/刷新 + 添加 + 头像
+export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashboard, onOpenLabels, isMobile, onOpenDrawer }) => {
+  const { t } = useTranslation()
+  const search = useAppStore((s) => s.filters.search)
+  const filters = useAppStore((s) => s.filters)
+  const setFilters = useAppStore((s) => s.setFilters)
+  const selectedIds = useAppStore((s) => s.selectedIds)
+  const clearSelection = useAppStore((s) => s.clearSelection)
+  const theme = useAppStore((s) => s.theme)
+  const themePreset = useAppStore((s) => s.themePreset)
+  const setTheme = useAppStore((s) => s.setTheme)
+  const setThemePreset = useAppStore((s) => s.setThemePreset)
+  const language = useAppStore((s) => s.language)
+  const setLanguage = useAppStore((s) => s.setLanguage)
+  const actions = useTorrentActions()
+  const [avatarOpen, setAvatarOpen] = useState(false)
+  const [removeOpen, setRemoveOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const hasSelection = selectedIds.length > 0
+  // 与 clearAll 覆盖的条件保持一致：状态 / 站点 / 目录 / 标签 / 错误 / 搜索
+  const hasActiveFilters = useMemo(
+    () => !!(
+      filters.status[0] !== 'all' ||
+      filters.sites.length > 0 ||
+      filters.downloadDirs.length > 0 ||
+      filters.labels.length > 0 ||
+      filters.error.length > 0 ||
+      filters.search
+    ),
+    [filters],
+  )
+
+  const clearAll = () => {
+    setFilters({ status: ['all'], sites: [], downloadDirs: [], labels: [], error: [], search: '' })
+  }
+
+  // 批量校验 / 重新通告（循环调用单种子接口，统一提示）
+  const runLoop = async (fn: (id: number) => Promise<unknown>, key: string) => {
+    if (selectedIds.length === 0) return
+    setBusy(true)
+    try {
+      for (const id of selectedIds) await fn(id)
+      toast.success(t(key))
+      clearSelection()
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <header className="shrink-0 glass-panel-strong rounded-2xl px-3 sm:px-4 py-2 z-30 select-none">
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+        {/* 移动端抽屉按钮 */}
+        {isMobile && onOpenDrawer && (
+          <button
+            onClick={onOpenDrawer}
+            className="h-9 w-9 shrink-0 rounded-full flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/10 transition-colors"
+            aria-label="menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+
+        {/* Logo + 标题 */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <span className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] flex items-center justify-center shadow-lg shadow-primary/30">
+            <span className="text-white font-bold text-body tracking-tight">TW</span>
+          </span>
+          <div className="leading-tight hidden sm:block">
+            <span className="font-semibold text-subhead text-gray-800 dark:text-gray-100">
+              <span className="text-primary">Transmission</span> WebUI <span className="text-gray-400 dark:text-gray-500 font-medium text-body">for fnOS</span>
+            </span>
+          </div>
+        </div>
+
+        {/* 搜索：移动端选中时收起（编辑模式），让位给批量操作；无选中时相对整行居中 */}
+        {!(isMobile && hasSelection) && (
+          <div className={cn('min-w-0', hasSelection ? 'flex-1 max-w-md' : 'mx-auto w-full max-w-md')}>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                id="search-input"
+                data-search-input
+                value={search}
+                onChange={(e) => setFilters({ search: e.target.value })}
+                placeholder={t('topbar.searchPlaceholder')}
+                className="h-9 pl-9 pr-3 rounded-full bg-white/60 dark:bg-white/10 border-transparent shadow-inner text-body focus-visible:ring-primary/50"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* 批量操作 + 标签筛选 + 重置（选中时出现在同一行，窄屏横向滚动） */}
+        {hasSelection && (
+          <div className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex items-center gap-0.5 w-max">
+              <ToolBtn icon={Play} large={isMobile} title={t('action.start')} disabled={busy} onClick={() => void actions.start(selectedIds)} />
+              <ToolBtn icon={Pause} large={isMobile} title={t('action.stop')} disabled={busy} onClick={() => void actions.stop(selectedIds)} />
+              <ToolBtn icon={Trash2} large={isMobile} title={t('action.remove')} danger disabled={busy} onClick={() => setRemoveOpen(true)} />
+              <ToolBtn icon={FolderInput} large={isMobile} title={t('action.changePath')} disabled={busy} onClick={() => setMoveOpen(true)} />
+              <ToolBtn icon={Tags} large={isMobile} title={t('action.editLabels')} disabled={busy} onClick={onOpenLabels} />
+              <ToolBtn icon={RefreshCw} large={isMobile} title={t('action.verify')} disabled={busy} onClick={() => runLoop((id) => torrentApi.verify(id), 'toast.verifyStarted')} />
+              <ToolBtn icon={Repeat} large={isMobile} title={t('action.reannounce')} disabled={busy} onClick={() => runLoop((id) => torrentApi.reannounce(id), 'toast.reannounced')} />
+
+              <span className="h-5 px-2 ml-1 rounded-full bg-primary/10 text-primary text-caption1 font-semibold flex items-center whitespace-nowrap">
+                {selectedIds.length}
+              </span>
+
+              <span className="w-px h-5 bg-gray-200 dark:bg-white/10 mx-1.5 shrink-0" />
+
+              <button
+                onClick={onOpenLabels}
+                className={cn(
+                  isMobile ? 'h-11 px-4' : 'h-9 px-3',
+                  'flex items-center justify-center rounded-full text-body font-medium transition-colors shrink-0',
+                  filters.labels.length > 0
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-primary hover:bg-primary/10',
+                )}
+                title={t('action.editLabels')}
+              >
+                <span className="flex items-center gap-1">
+                  <span className="tm-mono">#</span>
+                  {filters.labels.length}
+                </span>
+              </button>
+              <ToolBtn icon={RotateCcw} large={isMobile} title={t('filter.clear')} disabled={!hasActiveFilters} onClick={clearAll} />
+            </div>
+          </div>
+        )}
+
+        {/* 右侧操作 */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* 排序 / 视图 / 刷新 / 统计（桌面端并入顶栏，移动端在 ListHeader） */}
+          {!isMobile && <ListControls compact onOpenDashboard={onOpenDashboard} />}
+
+          {!isMobile && (
+            <Button
+              onClick={onOpenAdd}
+              className="h-9 sm:h-10 w-9 sm:w-auto px-0 sm:px-4 rounded-full bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/30 gap-1.5 text-body font-medium"
+              aria-label={t('topbar.addTask')}
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">{t('topbar.addTask')}</span>
+            </Button>
+          )}
+
+          {/* 头像菜单：统计 / 主题 / 语言 / 设置 */}
+          <Popover open={avatarOpen} onOpenChange={setAvatarOpen}>
+            <PopoverTrigger asChild>
+              <button
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[var(--brand-grad-to)] to-[var(--brand-grad-from)] text-white text-body font-semibold flex items-center justify-center shadow-md hover:scale-105 transition-transform outline-none"
+                aria-label="avatar"
+              >
+                {language === 'zh' ? '中' : 'EN'}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="glass-panel-strong w-64 p-1.5" align="end">
+              {/* 主题：浅色/深色 + 预设色板（选择不关闭弹层，便于实时预览） */}
+              <div className="px-3 pt-2.5 pb-2">
+                <p className="text-caption1 font-medium text-gray-400 mb-1.5">{t('theme.title')}</p>
+                <div className="flex rounded-lg bg-gray-100 dark:bg-gray-800/80 p-0.5 mb-2.5">
+                  {(['light', 'dark'] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setTheme(m)}
+                      className={cn(
+                        'flex-1 h-7 rounded-md text-footnote font-medium transition-colors',
+                        theme === m
+                          ? 'bg-white dark:bg-gray-700 text-primary shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700 dark:text-gray-400',
+                      )}
+                    >
+                      {t(`theme.${m}`)}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between">
+                  {THEME_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setThemePreset(p.id)}
+                      title={t(`theme.preset.${p.id}`)}
+                      aria-label={t(`theme.preset.${p.id}`)}
+                      className={cn(
+                        'w-7 h-7 rounded-full flex items-center justify-center transition-transform hover:scale-110 active:scale-90',
+                        themePreset === p.id && 'ring-2 ring-offset-2 ring-offset-white/80 dark:ring-offset-gray-900',
+                      )}
+                      style={{
+                        background: `linear-gradient(135deg, ${p.from}, ${p.to})`,
+                        ...(themePreset === p.id ? { '--tw-ring-color': p.from } : {}),
+                      } as React.CSSProperties}
+                    >
+                      {themePreset === p.id && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3.5} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mx-1.5 mb-1 h-px bg-gray-200/70 dark:bg-white/10" />
+
+              <button
+                onClick={() => { setLanguage(language === 'zh' ? 'en' : 'zh'); setAvatarOpen(false) }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-body text-left hover:bg-white/60 dark:hover:bg-white/10"
+              >
+                <Globe className="w-4 h-4 text-primary" />
+                {language === 'zh' ? 'English' : '中文'}
+              </button>
+              <button
+                onClick={() => { setAvatarOpen(false); onOpenSettings() }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-body text-left hover:bg-white/60 dark:hover:bg-white/10"
+              >
+                <Settings className="w-4 h-4 text-gray-500" />
+                {t('common.settings')}
+              </button>
+            </PopoverContent>
+          </Popover>
+        </div>
+      </div>
+
+      {/* 激活筛选标签（仅在有筛选时显示） */}
+      {hasActiveFilters && (
+        <div className="w-full flex flex-wrap items-center gap-1 px-1 pt-2">
+          {filters.labels.map((label) => (
+            <FilterChip
+              key={label}
+              label={`#${label}`}
+              onRemove={() => setFilters({ labels: filters.labels.filter((l) => l !== label) })}
+              color="#8b5cf6"
+            />
+          ))}
+          {filters.sites.map((siteId) => (
+            <FilterChip
+              key={siteId}
+              label={siteId === '__other__' ? t('site.other') : `#${siteId}`}
+              onRemove={() => setFilters({ sites: filters.sites.filter((s) => s !== siteId) })}
+              color="#007aff"
+            />
+          ))}
+          {filters.downloadDirs.map((dir) => (
+            <FilterChip
+              key={dir}
+              label={dir}
+              onRemove={() => setFilters({ downloadDirs: filters.downloadDirs.filter((d) => d !== dir) })}
+              color="#34c759"
+            />
+          ))}
+          {filters.search && (
+            <FilterChip label={`"${filters.search}"`} onRemove={() => setFilters({ search: '' })} color="#ff9500" />
+          )}
+        </div>
+      )}
+
+      {/* 对话框 */}
+      <RemoveTorrentDialog open={removeOpen} ids={selectedIds} onClose={() => setRemoveOpen(false)} />
+      <BatchMoveDialog open={moveOpen} ids={selectedIds} onClose={() => setMoveOpen(false)} />
+    </header>
+  )
+}
+
+// ========== FilterChip ==========
+interface FilterChipProps {
+  label: string
+  onRemove: () => void
+  color: string
+}
+
+const FilterChip: React.FC<FilterChipProps> = ({ label, onRemove, color }) => (
+  <span
+    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-footnote font-medium"
+    style={{ backgroundColor: `${color}18`, color }}
+  >
+    {label}
+    <button onClick={onRemove} className="ml-0.5 opacity-70 hover:opacity-100">×</button>
+  </span>
+)
