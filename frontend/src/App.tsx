@@ -63,6 +63,7 @@ export default function App() {
   const reduceGlass = useAppStore((s) => s.reduceGlass)
   const reduceMotion = useAppStore((s) => s.reduceMotion)
   const moreContrast = useAppStore((s) => s.moreContrast)
+  const glassOpacity = useAppStore((s) => s.glassOpacity)
   const a11yTouched = useAppStore((s) => s.a11yTouched)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -174,7 +175,8 @@ export default function App() {
     root.dataset.a11yGlass = reduceGlass ? 'reduce' : 'full'
     root.dataset.a11yMotion = reduceMotion ? 'reduce' : 'full'
     root.dataset.a11yContrast = moreContrast ? 'more' : 'normal'
-  }, [reduceGlass, reduceMotion, moreContrast])
+    root.style.setProperty('--glass-user-opacity', String(glassOpacity / 100))
+  }, [reduceGlass, reduceMotion, moreContrast, glassOpacity])
 
   // 跟随宿主环境（如 fnOS 的系统主题/语言）；通用平台拿不到 env，保持用户自设
   useEffect(() => {

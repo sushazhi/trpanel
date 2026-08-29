@@ -516,6 +516,8 @@ export default {
     fontSizeHint: '整体缩放界面文字大小',
     singleLineHint: '表格行更紧凑，单行只显示核心字段',
     showCheckboxesHint: '列表常显勾选框，方便批量操作',
+    glassOpacity: '玻璃浓度',
+    glassOpacityHint: '数值越低玻璃越通透，背景内容更明显',
     reduceGlassHint: '用实底替代玻璃模糊，降低视觉干扰',
     reduceMotionHint: '关闭抬升与弹性动画',
     moreContrastHint: '加深次要文字，提升可读性',

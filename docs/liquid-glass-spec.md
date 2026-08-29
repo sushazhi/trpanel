@@ -16,6 +16,9 @@ iOS 27 beta 的方向保留「玻璃更透、用户可控」的无障碍降级�
 
 - **只有承载滚动内容的顶层面板允许 `backdrop-filter`**；玻璃容器内的子卡片用
   `.glass-subcard`、二级浮层（下拉/子菜单）用 `.glass-panel-solid`，禁止二次模糊叠加。
+- 玻璃浓度可由用户调节（设置 → 界面滑杆，20–100%），统一由 `--glass-user-opacity`
+  乘数驱动；新材质填充 alpha 必须写成 `calc(基础alpha * var(--glass-user-opacity))`。
+  `.glass-panel-solid` 与 reduce 实底不参与缩放。
 - 遮罩层：`bg-black/25 backdrop-blur-[10px] backdrop-saturate-[.8]`（dialog/sheet 通用）。
 - 滚动边缘（scroll edge effect）：内容滑入停靠栏用 `.tm-scroll` 的 mask 渐隐，
   材质增强由 `.tm-shell[data-edge='scrolled']` 驱动，两处都不要手写。

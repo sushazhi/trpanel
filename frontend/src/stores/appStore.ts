@@ -79,6 +79,8 @@ export interface AppState {
   reduceMotion: boolean
   moreContrast: boolean
   a11yTouched: boolean
+  // 玻璃浓度百分比（20–100），驱动 --glass-user-opacity 乘数
+  glassOpacity: number
 
   setSortField: (field: string) => void
   setSortOrder: (order: 'asc' | 'desc') => void
@@ -114,6 +116,7 @@ export interface AppState {
   setReduceGlass: (v: boolean) => void
   setReduceMotion: (v: boolean) => void
   setMoreContrast: (v: boolean) => void
+  setGlassOpacity: (n: number) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -147,6 +150,7 @@ export const useAppStore = create<AppState>()(
       reduceMotion: false,
       moreContrast: false,
       a11yTouched: false,
+      glassOpacity: 100,
 
       setFontSize: (n) => set({ fontSize: n }),
       setGroupShowSize: (v) => set({ groupShowSize: v }),
@@ -201,6 +205,7 @@ export const useAppStore = create<AppState>()(
       setReduceGlass: (v) => set({ reduceGlass: v, a11yTouched: true }),
       setReduceMotion: (v) => set({ reduceMotion: v, a11yTouched: true }),
       setMoreContrast: (v) => set({ moreContrast: v, a11yTouched: true }),
+      setGlassOpacity: (n) => set({ glassOpacity: Math.min(100, Math.max(20, Math.round(n))) }),
     }),
     {
       name: 'tm-store',
@@ -227,6 +232,7 @@ export const useAppStore = create<AppState>()(
         reduceMotion: state.reduceMotion,
         moreContrast: state.moreContrast,
         a11yTouched: state.a11yTouched,
+        glassOpacity: state.glassOpacity,
       }),
       // 兼容旧版本持久化数据：补齐新增字段，避免运行时 undefined 崩溃
       merge: (persisted, current) => {

@@ -168,6 +168,8 @@
   --glass-sat-active: 190%;
   --glass-fill-rest: 0;
   --glass-fill-active: 1;
+  /* 用户可调玻璃浓度乘数（设置滑杆 20–100% → 0.2–1），无障碍降级时忽略 */
+  --glass-user-opacity: 1;
 
   --glass-border-light: rgba(255, 255, 255, 0.7);
   --glass-border-dark: rgba(255, 255, 255, 0.12);
@@ -440,7 +442,7 @@ select {
   --dock-sat: var(--glass-sat-rest);
   --dock-fill: var(--glass-fill-rest);
   transition: backdrop-filter 0.35s var(--ease-standard), box-shadow 0.35s var(--ease-standard),
-    border-color 0.35s var(--ease-standard);
+    border-color 0.35s var(--ease-standard), background 0.35s var(--ease-standard);
 }
 .tm-shell[data-edge='scrolled'] .tm-dock {
   --dock-blur: var(--glass-blur-active);
@@ -451,8 +453,8 @@ select {
 .glass-panel {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, calc(0.6 + var(--dock-fill) * 0.22)) 0%,
-    rgba(255, 255, 255, calc(0.36 + var(--dock-fill) * 0.24)) 100%
+    rgba(255, 255, 255, calc((0.6 + var(--dock-fill) * 0.22) * var(--glass-user-opacity))) 0%,
+    rgba(255, 255, 255, calc((0.36 + var(--dock-fill) * 0.24) * var(--glass-user-opacity))) 100%
   );
   backdrop-filter: blur(var(--dock-blur)) saturate(var(--dock-sat));
   -webkit-backdrop-filter: blur(var(--dock-blur)) saturate(var(--dock-sat));
@@ -462,7 +464,7 @@ select {
 
 /* 浮层材质：弹层/菜单/胶囊，不随滚动变化，始终最厚最实 */
 .glass-panel-strong {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.86) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.94 * var(--glass-user-opacity))) 0%, rgba(255, 255, 255, calc(0.86 * var(--glass-user-opacity))) 100%);
   backdrop-filter: blur(var(--glass-blur-float)) saturate(200%);
   -webkit-backdrop-filter: blur(var(--glass-blur-float)) saturate(200%);
   border: 1px solid var(--glass-border-light);
@@ -481,14 +483,14 @@ select {
 .glass-subcard {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.5) 0%,
-    rgba(255, 255, 255, 0.28) 100%
+    rgba(255, 255, 255, calc(0.5 * var(--glass-user-opacity))) 0%,
+    rgba(255, 255, 255, calc(0.28 * var(--glass-user-opacity))) 100%
   );
   border: 1px solid rgba(255, 255, 255, 0.6);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 3px rgba(60, 80, 120, 0.06);
 }
 .dark .glass-subcard {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.03) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.07 * var(--glass-user-opacity))) 0%, rgba(255, 255, 255, calc(0.03 * var(--glass-user-opacity))) 100%);
   border-color: rgba(255, 255, 255, 0.09);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 3px rgba(0, 0, 0, 0.25);
 }
@@ -497,8 +499,8 @@ select {
 .glass-card {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.62) 0%,
-    rgba(255, 255, 255, 0.38) 100%
+    rgba(255, 255, 255, calc(0.62 * var(--glass-user-opacity))) 0%,
+    rgba(255, 255, 255, calc(0.38 * var(--glass-user-opacity))) 100%
   );
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
@@ -510,7 +512,7 @@ select {
 }
 .glass-card:hover {
   transform: translateY(-2px);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.55) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.78 * var(--glass-user-opacity))) 0%, rgba(255, 255, 255, calc(0.55 * var(--glass-user-opacity))) 100%);
   box-shadow: var(--glass-shadow-float), var(--glass-ring-light);
 }
 
@@ -518,8 +520,8 @@ select {
 .dark .glass-panel {
   background: linear-gradient(
     180deg,
-    rgba(46, 46, 52, calc(0.6 + var(--dock-fill) * 0.26)) 0%,
-    rgba(28, 28, 34, calc(0.42 + var(--dock-fill) * 0.28)) 100%
+    rgba(46, 46, 52, calc((0.6 + var(--dock-fill) * 0.26) * var(--glass-user-opacity))) 0%,
+    rgba(28, 28, 34, calc((0.42 + var(--dock-fill) * 0.28) * var(--glass-user-opacity))) 100%
   );
   border-color: var(--glass-border-dark);
   box-shadow: var(--glass-shadow-light), var(--glass-ring-dark);
@@ -529,7 +531,7 @@ select {
 }
 
 .dark .glass-panel-strong {
-  background: linear-gradient(180deg, rgba(58, 58, 66, 0.94) 0%, rgba(40, 40, 48, 0.88) 100%);
+  background: linear-gradient(180deg, rgba(58, 58, 66, calc(0.94 * var(--glass-user-opacity))) 0%, rgba(40, 40, 48, calc(0.88 * var(--glass-user-opacity))) 100%);
   border-color: var(--glass-border-dark);
   box-shadow: var(--glass-shadow-float-dark), var(--glass-ring-dark);
 }
@@ -541,12 +543,12 @@ select {
 }
 
 .dark .glass-card {
-  background: linear-gradient(180deg, rgba(46, 46, 52, 0.6) 0%, rgba(28, 28, 34, 0.42) 100%);
+  background: linear-gradient(180deg, rgba(46, 46, 52, calc(0.6 * var(--glass-user-opacity))) 0%, rgba(28, 28, 34, calc(0.42 * var(--glass-user-opacity))) 100%);
   border-color: var(--glass-border-dark);
   box-shadow: var(--glass-shadow-light), var(--glass-ring-dark);
 }
 .dark .glass-card:hover {
-  background: linear-gradient(180deg, rgba(58, 58, 66, 0.78) 0%, rgba(40, 40, 48, 0.6) 100%);
+  background: linear-gradient(180deg, rgba(58, 58, 66, calc(0.78 * var(--glass-user-opacity))) 0%, rgba(40, 40, 48, calc(0.6 * var(--glass-user-opacity))) 100%);
   box-shadow: var(--glass-shadow-float-dark), var(--glass-ring-dark);
 }
 

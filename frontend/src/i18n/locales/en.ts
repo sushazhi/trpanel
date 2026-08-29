@@ -516,6 +516,8 @@ export default {
     fontSizeHint: 'Scales all interface text sizes',
     singleLineHint: 'Compact table rows with only core fields',
     showCheckboxesHint: 'Always show checkboxes for batch selection',
+    glassOpacity: 'Glass Opacity',
+    glassOpacityHint: 'Lower values make the glass clearer, background shows through more',
     reduceGlassHint: 'Use solid fills instead of glass blur',
     reduceMotionHint: 'Disable lift and spring animations',
     moreContrastHint: 'Darken secondary text for readability',

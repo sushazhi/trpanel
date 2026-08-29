@@ -290,7 +290,7 @@ function AboutSection({ transmissionVersion }: { transmissionVersion?: string })
   const readyWithoutInstall = !!info?.downloadReady && !updStatus
 
   return (
-    <div className="pt-3 mt-3 border-t border-gray-100 dark:border-gray-700 text-footnote text-gray-400">
+    <div className="pt-3 mt-3 border-t border-gray-100 dark:border-gray-700 text-body text-gray-600 dark:text-gray-300">
       <div className="flex items-center justify-between gap-2">
         <span>
           {t('session.about')}: Transmission WebUI{canUpdate ? ' for fnOS' : ''}
@@ -314,7 +314,7 @@ function AboutSection({ transmissionVersion }: { transmissionVersion?: string })
             <span>v{info.currentVersion} → v{info.latestVersion} ({info.arch})</span>
           </div>
           {info.hasUpdate && info.changelog && (
-            <div className="max-h-28 overflow-y-auto whitespace-pre-line text-gray-500 dark:text-gray-400">{info.changelog}</div>
+            <div className="max-h-28 overflow-y-auto whitespace-pre-line text-gray-600 dark:text-gray-400">{info.changelog}</div>
           )}
           {info.hasUpdate && (
             <div className="space-y-2">
@@ -374,6 +374,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const setReduceGlass = useAppStore((s) => s.setReduceGlass)
   const setReduceMotion = useAppStore((s) => s.setReduceMotion)
   const setMoreContrast = useAppStore((s) => s.setMoreContrast)
+  const glassOpacity = useAppStore((s) => s.glassOpacity)
+  const setGlassOpacity = useAppStore((s) => s.setGlassOpacity)
 
   const [url, setUrl] = useState('')
   const [user, setUser] = useState('')
@@ -574,6 +576,22 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       </Row>
       <Row label={t('session.showCheckboxes')} hint={t('session.showCheckboxesHint')}>
         <Switch checked={showCheckboxes} onCheckedChange={setShowCheckboxes} />
+      </Row>
+      <Row label={t('session.glassOpacity')} hint={t('session.glassOpacityHint')}>
+        <div className="flex items-center gap-2 shrink-0">
+          <input
+            type="range"
+            min={20}
+            max={100}
+            step={5}
+            value={glassOpacity}
+            disabled={reduceGlass}
+            onChange={(e) => setGlassOpacity(Number(e.target.value))}
+            className="w-36 h-8 accent-primary disabled:opacity-40 cursor-pointer"
+            aria-label={t('session.glassOpacity')}
+          />
+          <span className="text-footnote text-gray-400 tm-mono w-10 text-right">{glassOpacity}%</span>
+        </div>
       </Row>
 
       <div className="pt-2">
