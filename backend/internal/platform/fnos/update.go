@@ -21,7 +21,7 @@ import (
 
 // fnOS 应用更新：GitHub Release 检测最新版 + gh-proxy 回退下载 fpk 包
 const (
-	updateRepo        = "sushazhi/Transmission-WebUI-for-fnOS"
+	updateRepo        = "sushazhi/fnos-transmission"
 	updateAPIBase     = "https://api.github.com"
 	updateProxyMain   = "https://gh-proxy.com/"
 	updateProxyBackup = "https://gh-proxy.org/"
