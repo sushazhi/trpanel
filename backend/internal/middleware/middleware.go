@@ -50,6 +50,17 @@ func SameOriginWriteGuard(p platform.Platform) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// 网关模式：宿主统一认证 + 服务仅本机 socket/回环可达，信任网关转发，
+		// 只保留浏览器侧的 Sec-Fetch-Site 跨站标记校验；直连部署保持严格同源比对。
+		// 若不放开，网关改写的 Host / 缺失的 X-Forwarded-Host 会让所有写请求误判跨域而 403。
+		if pol.AllowEmbedding {
+			if site := c.GetHeader("Sec-Fetch-Site"); site == "cross-site" {
+				respondForbidden(c, http.StatusForbidden, "跨站请求已被拒绝（Sec-Fetch-Site: cross-site）")
+				return
+			}
+			c.Next()
+			return
+		}
 		origin := c.GetHeader("Origin")
 		if origin == "" {
 			switch site := c.GetHeader("Sec-Fetch-Site"); site {

@@ -214,13 +214,15 @@ func (h *Hub) pollLocked() {
 
 // HandleWS 处理 WebSocket 连接
 func (h *Hub) HandleWS(c *gin.Context) {
-	// 与写接口共用同一套同站判定：仅放行同源、开发前端源，
-	// 以及网关模式下 X-Forwarded-Host 指向的真实主机。
-	// 否则任意网页都能在受害者浏览器里静默订阅全量种子数据（名称/路径/磁力链接）。
-	if origin := c.Request.Header.Get("Origin"); origin != "" &&
-		!h.plat.SecurityPolicy().IsSameSiteOrigin(c.Request, origin) {
-		respondError(c, http.StatusForbidden, "Origin 不被信任")
-		return
+	// 网关模式（AllowEmbedding）：宿主统一认证 + 服务仅本机 socket/回环可达，信任网关转发，
+	// 跳过 Origin 同源判定（网关改写的 Host / 缺失的 X-Forwarded-Host 会让 WS 误判跨域而 403）。
+	// 直连部署保持严格同源校验，防止任意网页静默订阅全量种子数据（名称/路径/磁力链接）。
+	if !h.plat.SecurityPolicy().AllowEmbedding {
+		if origin := c.Request.Header.Get("Origin"); origin != "" &&
+			!h.plat.SecurityPolicy().IsSameSiteOrigin(c.Request, origin) {
+			respondError(c, http.StatusForbidden, "Origin 不被信任")
+			return
+		}
 	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
