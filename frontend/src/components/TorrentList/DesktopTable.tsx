@@ -5,13 +5,16 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
-import { trimOpenPath, useTrimEnv } from '@/hooks/useTrimEnv'
+import { useRevealPath } from '@/hooks/useRevealPath'
+import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
 import type { ColumnConfig, Torrent } from '@/types'
-import { formatBytes, formatDate, formatDuration, formatEta, formatPercent, formatRatio, formatSpeed } from '@/utils/format'
+import { formatBytes, formatDate, formatDuration, formatEta, formatRatio, formatSpeed } from '@/utils/format'
+import { translateError } from '@/utils/errorText'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { StatusTag } from '@/components/status/StatusTag'
+import { ProgressBar } from '@/components/TorrentList/ProgressBar'
 import { buildTorrentMenu, EditModals, FloatingContextMenu, TorrentMenuDropdown } from '@/components/TorrentMenu'
 import { RemoveTorrentDialog, ReplaceTrackerDialog } from '@/components/ToolsDialogs'
 import type { EditMode, EditTarget, MenuItem } from '@/components/TorrentMenu'
@@ -29,13 +32,12 @@ const NUMERIC_COLS = new Set([
 // 单元格渲染
 function Cell({ torrent, col }: { torrent: Torrent; col: ColumnConfig }) {
   const { t } = useTranslation()
-  const pct = Math.round(torrent.percentDone * 1000) / 10
   switch (col.key) {
     case 'name':
       return (
         <div className="flex items-center gap-2 min-w-0 flex-1">
           {torrent.error > 0 && <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />}
-          <span className="truncate font-medium text-gray-800 dark:text-gray-100" title={torrent.errorString || torrent.name}>
+          <span className="truncate font-medium text-gray-800 dark:text-gray-100" title={translateError(torrent.errorString, t) || torrent.name}>
             {torrent.name}
           </span>
         </div>
@@ -43,14 +45,8 @@ function Cell({ torrent, col }: { torrent: Torrent; col: ColumnConfig }) {
     case 'size':
       return <span className="tm-mono">{formatBytes(torrent.totalSize)}</span>
     case 'progress':
-      return (
-        <div className="w-full pr-3">
-          <div className="tm-progress-track">
-            <div className="tm-progress-fill" style={{ width: `${pct}%` }} />
-          </div>
-          <div className="tm-mono text-footnote text-gray-500 mt-0.5">{formatPercent(torrent.percentDone)}</div>
-        </div>
-      )
+      // 百分比内嵌到进度条里（填充区白字 / 未填充区灰字）
+      return <ProgressBar value={torrent.percentDone} error={torrent.error > 0} />
     case 'status':
       return <StatusTag torrent={torrent} />
     case 'download':
@@ -139,7 +135,11 @@ function Cell({ torrent, col }: { torrent: Torrent; col: ColumnConfig }) {
     case 'hashString':
       return <span className="text-footnote tm-mono text-gray-500 truncate" title={torrent.hashString}>{torrent.hashString}</span>
     case 'error':
-      return <span className="text-red-500 truncate" title={torrent.errorString}>{torrent.errorString || '-'}</span>
+      return (
+        <span className="text-red-500 truncate" title={translateError(torrent.errorString, t) || undefined}>
+          {translateError(torrent.errorString, t) || '-'}
+        </span>
+      )
     default:
       return null
   }
@@ -153,8 +153,10 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
 }) {
   const { t } = useTranslation()
   const actions = useTorrentActions()
-  const { isTrimOS } = useTrimEnv()
+  const { can } = usePlatform()
+  const revealPath = useRevealPath()
   const columns = useAppStore((s) => s.columns)
+  const showCheckboxes = useAppStore((s) => s.showCheckboxes)
   const selectedIds = useAppStore((s) => s.selectedIds)
   const toggleSelect = useAppStore((s) => s.toggleSelect)
   const setSelection = useAppStore((s) => s.setSelection)
@@ -184,6 +186,9 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
     if (headerRef.current) headerRef.current.scrollLeft = e.currentTarget.scrollLeft
   }
 
+  // 正在拖拽调宽的列：拖拽期间分隔线保持高亮，避免跟随鼠标时看不清落点
+  const [resizingCol, setResizingCol] = useState<string | null>(null)
+
   // 表头拖拽调整列宽
   const startColResize = (e: React.MouseEvent, col: ColumnConfig) => {
     e.preventDefault()
@@ -196,11 +201,13 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
       document.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      setResizingCol(null)
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+    setResizingCol(col.key)
   }
 
   // 表头列拖拽移动（指针事件实现，不用 HTML5 DnD：避免浏览器半透明拖影、draggable 与调宽手柄冲突）
@@ -382,17 +389,17 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
     } else if (key === 'remove') {
       setRemoveIds([id])
     } else if (key === 'openDir') {
-      void trimOpenPath(torrent.downloadDir || '')
+      void revealPath(torrent.downloadDir || '')
     } else if (key === 'deleteCompleted') {
       onOpenBatchClean?.()
     }
   }
 
-  const menuCtx = { actions, t: (k: string) => t(k), onOpenDetail, isTrimOS, onEdit: (mode: EditMode, tt: Torrent) => setEditTarget({ torrent: tt, mode }), onOpenBatchClean }
+  const menuCtx = { actions, t: (k: string) => t(k), onOpenDetail, canRevealPath: can('fs.revealPath'), onEdit: (mode: EditMode, tt: Torrent) => setEditTarget({ torrent: tt, mode }), onOpenBatchClean }
 
   if (sortedTorrents.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-400">
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-400" style={{ paddingTop: 'var(--pad-top)', paddingBottom: 'var(--pad-bottom)' }}>
         <AlertCircle className="w-10 h-10 opacity-40" />
         <span className="text-body">{t('common.empty')}</span>
       </div>
@@ -414,7 +421,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" style={{ paddingTop: 'var(--pad-top)' }}>
       {/* 表头 */}
       <div
         ref={headerRef}
@@ -422,9 +429,9 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
           e.preventDefault()
           setColMenuPos({ x: e.clientX, y: e.clientY })
         }}
-        className="flex items-center border-b border-gray-100 dark:border-gray-700/50 px-3 h-9 text-footnote font-semibold tracking-wide text-gray-400 dark:text-gray-500 bg-white/50 dark:bg-white/[0.03] backdrop-blur-xl shrink-0 overflow-hidden"
+        className="tm-dock glass-panel flex items-center px-3 h-9 text-footnote font-semibold tracking-wide text-gray-400 dark:text-gray-500 shrink-0 overflow-hidden"
       >
-        <div className="w-8 shrink-0" />
+        {showCheckboxes && <div className="w-8 shrink-0" />}
         {visibleColumns.map((col) => {
           const isSortable = true
           return (
@@ -434,8 +441,8 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
               data-col-key={col.key}
               onMouseDown={(e) => startColDrag(e, col)}
               className={cn(
-                'px-2 truncate relative flex items-center gap-0.5 select-none transition-colors',
-                NUMERIC_COLS.has(col.key) && 'justify-end',
+                // 表头文字统一居中；数字列仅单元格右对齐，表头保持居中
+                'px-2 truncate relative flex items-center justify-center gap-0.5 select-none transition-colors',
                 overCol === col.key ? 'bg-primary/10' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.06]',
                 dragCol === col.key && 'opacity-40',
               )}
@@ -444,12 +451,23 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
             >
               {t(col.label)}
               {isSortable && sortIcon(col.key)}
+              {/* 列宽手柄：常驻 2px 分隔线（hover/拖拽时加粗成品牌色），
+                  热区 12px 且跨列边界 5px，方便从两侧抓住 */}
               <span
                 data-col-resize
-                className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize border-r border-gray-200/80 dark:border-gray-700/60 hover:bg-primary/40 hover:border-primary/50"
+                className="group/resize absolute -right-[5px] top-0 bottom-0 z-10 w-3 flex items-center justify-center cursor-col-resize"
                 onMouseDown={(e) => startColResize(e, col)}
                 onClick={(e) => e.stopPropagation()}
-              />
+              >
+                <span
+                  className={cn(
+                    'rounded-full transition-all duration-150',
+                    resizingCol === col.key
+                      ? 'w-[3px] h-[85%] bg-primary'
+                      : 'w-[2px] h-[65%] bg-gray-400/90 dark:bg-gray-500 group-hover/resize:w-[3px] group-hover/resize:h-[85%] group-hover/resize:bg-primary',
+                  )}
+                />
+              </span>
             </div>
           )
         })}
@@ -457,7 +475,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
       </div>
 
       {/* 虚拟滚动区 */}
-      <div ref={parentRef} onScroll={syncHeaderScroll} className="flex-1 overflow-auto">
+      <div ref={parentRef} onScroll={syncHeaderScroll} className="tm-scroll tm-scroll--notch flex-1">
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((vi) => {
             const torrent = sortedTorrents[vi.index]
@@ -470,7 +488,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
               >
                 <TorrentMenuDropdown items={menuItems} onClick={handleMenuClick(torrent)} trigger="contextMenu" align="start">
                   <div
-                    title={torrent.error > 0 ? (torrent.errorString || torrent.name) : torrent.name}
+                    title={torrent.error > 0 ? (translateError(torrent.errorString, t) || torrent.name) : torrent.name}
                     draggable
                     onDragStart={(e) => {
                       dragIdRef.current = torrent.id
@@ -484,14 +502,16 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
                     onClick={(e) => handleSelect(torrent, e)}
                     className={`tm-nav-item flex items-center px-3 h-full border-b border-gray-100/60 dark:border-white/[0.04] text-body cursor-default select-none ${
                       selectedIds.includes(torrent.id)
-                        ? 'bg-primary/10 shadow-[inset_3px_0_0_var(--color-primary)]'
+                        ? 'tm-nav-active'
                         : ''
                     } hover:bg-gray-100/50 dark:hover:bg-white/[0.04]`}
                     onDoubleClick={() => onOpenDetail(torrent)}
                   >
-                    <div className="shrink-0 w-8 h-8 flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-                      <Checkbox checked={selectedIds.includes(torrent.id)} onCheckedChange={() => { toggleSelect(torrent.id); setSelectAnchor(torrent.id) }} />
-                    </div>
+                    {showCheckboxes && (
+                      <div className="shrink-0 w-8 h-8 flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={selectedIds.includes(torrent.id)} onCheckedChange={() => { toggleSelect(torrent.id); setSelectAnchor(torrent.id) }} />
+                      </div>
+                    )}
                     {visibleColumns.map((col) => (
                       <div key={col.key} className={cn('px-2 truncate', NUMERIC_COLS.has(col.key) && 'text-right')} style={headerStyle(col)}>
                         <Cell torrent={torrent} col={col} />

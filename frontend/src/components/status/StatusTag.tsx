@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import type { Torrent } from '@/types'
 import { Badge } from '@/components/ui/badge'
+import { translateError } from '@/utils/errorText'
 
 const colorMap: Record<number, string> = {
   0: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
@@ -18,7 +19,7 @@ export function StatusTag({ torrent }: { torrent: Torrent }) {
   const { t } = useTranslation()
   if (torrent.error > 0) {
     return (
-      <Badge className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" title={torrent.errorString || undefined}>
+      <Badge className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" title={translateError(torrent.errorString, t) || undefined}>
         {t('status.error')}
       </Badge>
     )

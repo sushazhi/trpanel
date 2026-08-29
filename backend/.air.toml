@@ -1,0 +1,28 @@
+# air 配置：Go 后端热重载（修改 .go 文件后自动重新编译并重启）
+# 安装：go install github.com/air-verse/air@latest
+# 用法：dev.ps1 / dev.sh 检测到 air 时自动使用；也可在 backend/ 下直接运行 `air`
+root = "."
+# 构建产物与 air 日志写入项目根 dev/air（已被 .gitignore 忽略）
+tmp_dir = "../dev/air"
+
+[build]
+  # 构建命令：编译到 dev/air；统一带 .exe —— Windows 必须带扩展名才能被执行，
+  # Linux/macOS 下扩展名无影响，两端保持一致即可
+  cmd = "go build -o ../dev/air/tm-server.exe ./cmd/server"
+  # air 直接执行的入口二进制（替代已废弃的 build.bin）
+  entrypoint = ["../dev/air/tm-server.exe"]
+  # 仅监听 Go 源码与配置模板；前端产物 web/dist 变化由 Vite HMR 处理，不触发后端重建
+  include_ext = ["go", "yaml", "yml"]
+  exclude_dir = ["web", "dev", "tmp", ".git", "node_modules"]
+  exclude_regex = ["_test\\.go"]
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = "500ms"
+  # 批量保存时合并多次变更，避免连续重复构建
+  delay = 500
+
+[log]
+  time = true
+
+[screen]
+  clear_on_rebuild = true

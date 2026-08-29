@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -148,10 +150,11 @@ func (h *Handler) addTorrent(c *gin.Context) {
 		return
 	}
 
-	// 方式二：JSON 提供 URL 或磁力链接
+	// 方式二：JSON 提供 URL / 磁力链接 / NAS 路径（飞牛文件选择器选中路径）
 	var body struct {
 		URL               string   `json:"url"`
 		Magnet            string   `json:"magnet"`
+		Path              string   `json:"path"`
 		DownloadDir       string   `json:"downloadDir"`
 		Paused            bool     `json:"paused"`
 		Verify            bool     `json:"verify"`
@@ -159,7 +162,29 @@ func (h *Handler) addTorrent(c *gin.Context) {
 		BandwidthPriority *int64   `json:"bandwidthPriority"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		respondError(c, http.StatusBadRequest, "请求体无效，需要 multipart 文件或 JSON {url|magnet}")
+		respondError(c, http.StatusBadRequest, "请求体无效，需要 multipart 文件或 JSON {url|magnet|path}")
+		return
+	}
+	if body.Path != "" {
+		// 从 NAS 路径读取 .torrent 内容添加（飞牛文件选择器返回语义化路径）
+		data, err := h.readTorrentFile(body.Path)
+		if err != nil {
+			slog.Warn("按路径添加种子被拒", "path", body.Path, "err", err)
+			respondError(c, http.StatusForbidden, "种子路径不可用")
+			return
+		}
+		id, err := h.rpc.Client().AddTorrentByFile(ctx, data, body.DownloadDir, body.Paused, body.Labels, body.BandwidthPriority, nil, nil)
+		if err != nil {
+			respondError(c, http.StatusBadGateway, "添加种子失败: "+err.Error())
+			return
+		}
+		if body.Verify {
+			if err := h.rpc.Client().VerifyTorrents(ctx, []int64{id}); err != nil {
+				respondError(c, http.StatusBadGateway, "校验种子失败: "+err.Error())
+				return
+			}
+		}
+		respond(c, gin.H{"id": id})
 		return
 	}
 	link := body.URL
@@ -167,7 +192,7 @@ func (h *Handler) addTorrent(c *gin.Context) {
 		link = body.Magnet
 	}
 	if link == "" {
-		respondError(c, http.StatusBadRequest, "缺少 URL 或磁力链接")
+		respondError(c, http.StatusBadRequest, "缺少 URL、磁力链接或种子路径")
 		return
 	}
 	id, err := h.rpc.Client().AddTorrentByURL(ctx, link, body.DownloadDir, body.Paused, body.Labels, body.BandwidthPriority)
@@ -182,6 +207,16 @@ func (h *Handler) addTorrent(c *gin.Context) {
 		}
 	}
 	respond(c, gin.H{"id": id})
+}
+
+// readTorrentFile 按宿主机路径读取种子内容（如 fnOS 文件选择器返回的路径）。
+// 是否允许读取、允许哪些目录由宿主平台的 FileAccess 策略决定：
+// 通用部署按 TORRENT_PATH_ROOTS 白名单限制，避免该接口沦为任意文件读取入口。
+func (h *Handler) readTorrentFile(path string) ([]byte, error) {
+	if err := h.plat.FileAccess().AllowRead(path); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
 }
 
 // addTorrentBatch 批量添加多个URL/磁力链接

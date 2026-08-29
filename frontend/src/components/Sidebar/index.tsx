@@ -3,11 +3,11 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  Check,
   CheckCircle,
   ChevronDown,
   CloudDownload,
   Download,
-  FolderCog,
   FolderOpen,
   Globe,
   HardDrive,
@@ -24,25 +24,29 @@ import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/stores/appStore'
 import { sessionApi } from '@/api/torrent'
 import { matchesStatus } from '@/hooks/useFilter'
+import { useNavRail } from '@/hooks/useNavRail'
 import { formatBytes, formatRatio, formatSpeed } from '@/utils/format'
+import { translateError } from '@/utils/errorText'
 import { tagColor } from '@/utils/tagColor'
 import { cn } from '@/lib/utils'
-import { toast } from '@/lib/toast'
-import { trimOpenPath, trimPickFolder } from '@/hooks/useTrimEnv'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 
-// 主状态过滤（与图一 1:1）：全部 / 正在下载 / 正在做种 / 已完成 / 暂停 / 错误
-const STATUS_ITEMS: { key: string; icon: React.ElementType; label: string; color: string }[] = [
-  { key: 'all', icon: Layers, label: 'nav.all', color: '#6c7587' },
-  { key: 'downloading', icon: CloudDownload, label: 'nav.downloading', color: '#007aff' },
-  { key: 'seeding', icon: Download, label: 'nav.seeding', color: '#34c759' },
-  { key: 'completed', icon: CheckCircle, label: 'nav.completed', color: '#8b5cf6' },
-  { key: 'paused', icon: X, label: 'nav.paused', color: '#6c7587' },
-  { key: 'verifying', icon: RotateCcw, label: 'nav.verifying', color: '#ff9500' },
-  { key: 'error', icon: ShieldAlert, label: 'nav.error', color: '#ff3b30' },
+// 主状态过滤（与图一 1:1）：全部 / 正在下载 / 正在做种 / 已完成 / 暂停 / 校验 / 错误
+// 图标统一由中性色承载、激活时染品牌色；仅 error 在存在异常时保留红色语义
+const STATUS_ITEMS: { key: string; icon: React.ElementType; label: string }[] = [
+  { key: 'all', icon: Layers, label: 'nav.all' },
+  { key: 'downloading', icon: CloudDownload, label: 'nav.downloading' },
+  { key: 'seeding', icon: Download, label: 'nav.seeding' },
+  { key: 'completed', icon: CheckCircle, label: 'nav.completed' },
+  { key: 'paused', icon: X, label: 'nav.paused' },
+  { key: 'verifying', icon: RotateCcw, label: 'nav.verifying' },
+  { key: 'error', icon: ShieldAlert, label: 'nav.error' },
 ]
+
+// 错误分组沿用渗入玻璃的选中语言，只把色相从品牌色换成系统红
+const ERROR_TINT = { '--nav-tint': 'var(--color-red-500)' } as React.CSSProperties
 
 export const DesktopSidebar: React.FC = () => {
   const { t } = useTranslation()
@@ -133,6 +137,11 @@ export const DesktopSidebar: React.FC = () => {
   }
 
   const activeStatus = filters.status[0] || 'all'
+  // 滑动玻璃胶囊：替代逐项换底色
+  const visibleStatusCount = STATUS_ITEMS.filter(
+    (item) => item.key === 'all' || statusFilterVisible[item.key] !== false,
+  ).length
+  const rail = useNavRail(activeStatus, `${visibleStatusCount}:${groupShowSize}`)
 
   // 实时速度汇总
   const totals = useMemo(() => {
@@ -243,29 +252,9 @@ export const DesktopSidebar: React.FC = () => {
 
   const setStatusFilter = (key: string) => setFilters({ status: key === 'all' ? ['all'] : [key] })
 
-  // fnOS 快捷方式
-  const openDownloadDir = async () => {
-    const dir = session?.downloadDir
-    if (!dir) return
-    const ok = await trimOpenPath(dir)
-    if (!ok) {
-      navigator.clipboard?.writeText(dir).catch(() => {})
-      toast.info(t('sidebar.openDirFallback', { dir }))
-    }
-  }
-  const configDir = async () => {
-    const picked = await trimPickFolder()
-    if (picked) {
-      navigator.clipboard?.writeText(picked).catch(() => {})
-      toast.success(t('sidebar.dirCopied', { dir: picked }))
-    } else {
-      toast.info(t('sidebar.configDirHint'))
-    }
-  }
-
   return (
     <aside
-      className="relative h-full shrink-0 flex flex-col"
+      className="tm-side flex flex-col"
       style={{ width: sidebarWidth }}
       onContextMenu={onSidebarContextMenu}
     >
@@ -275,18 +264,18 @@ export const DesktopSidebar: React.FC = () => {
         onMouseDown={onResizeStart}
       />
 
-      <div className="flex-1 min-h-0 glass-panel rounded-2xl flex flex-col overflow-hidden">
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 py-3 flex flex-col gap-4">
+      <div className="tm-dock glass-panel rounded-dock flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div className="tm-scroll tm-scroll--side flex-1 min-h-0 overflow-x-hidden px-3 flex flex-col gap-4">
           {/* LiveStats：大字号实时速度 */}
           <div className="shrink-0 grid grid-cols-2 gap-2">
-            <div className="glass-panel rounded-xl px-3 py-2.5 text-center">
+            <div className="glass-subcard rounded-tile px-3 py-2.5 text-center">
               <div className="flex items-center justify-center gap-1 text-caption1 text-gray-500 dark:text-gray-400 mb-0.5">
                 <ArrowDown className="w-3.5 h-3.5 text-green-500" />
                 {t('sidebar.download')}
               </div>
               <div className="tm-mono text-title2 font-semibold leading-tight text-green-500">{formatSpeed(totals.down)}</div>
             </div>
-            <div className="glass-panel rounded-xl px-3 py-2.5 text-center">
+            <div className="glass-subcard rounded-tile px-3 py-2.5 text-center">
               <div className="flex items-center justify-center gap-1 text-caption1 text-gray-500 dark:text-gray-400 mb-0.5">
                 <ArrowUp className="w-3.5 h-3.5 text-blue-500" />
                 {t('sidebar.upload')}
@@ -294,7 +283,7 @@ export const DesktopSidebar: React.FC = () => {
               <div className="tm-mono text-title2 font-semibold leading-tight text-blue-500">{formatSpeed(totals.up)}</div>
             </div>
             {showStats && (
-              <div className="col-span-2 glass-panel rounded-xl px-3 py-2 flex items-center justify-between text-caption1">
+              <div className="col-span-2 glass-subcard rounded-tile px-3 py-2 flex items-center justify-between text-caption1">
                 <span className="text-gray-400">{t('sidebar.down')}</span>
                 <span className="tm-mono text-green-600 dark:text-green-400">{formatBytes(totals.downloadedEver)}</span>
                 <span className="text-gray-400">{t('sidebar.up')}</span>
@@ -306,7 +295,7 @@ export const DesktopSidebar: React.FC = () => {
           </div>
 
           {/* DiskRing：SVG 环形图 + 可用容量 */}
-          <div className="shrink-0 glass-panel rounded-xl px-3 py-2.5 flex items-center gap-3">
+          <div className="shrink-0 glass-subcard rounded-tile px-3 py-2.5 flex items-center gap-3">
             <svg width="58" height="58" viewBox="0 0 58 58" className="-rotate-90 shrink-0">
               <circle cx="29" cy="29" r="22" stroke="rgba(120,130,160,0.16)" strokeWidth="6.5" fill="none" />
               <circle
@@ -334,7 +323,8 @@ export const DesktopSidebar: React.FC = () => {
           {sidebarMenuVisible.status && (
             <div className="shrink-0">
               <SectionHeader icon={<Layers className="w-3.5 h-3.5" />} title={t('nav.filter')} />
-              <div className="space-y-0.5 mt-1">
+              <div ref={rail.boxRef} className="relative flex flex-col gap-0.5 mt-1">
+                <span ref={rail.railRef} className="tm-nav-rail" aria-hidden />
                 {STATUS_ITEMS.filter((item) => item.key === 'all' || statusFilterVisible[item.key] !== false).map((item) => {
                   const Icon = item.icon
                   const isActive = activeStatus === String(item.key)
@@ -347,20 +337,27 @@ export const DesktopSidebar: React.FC = () => {
                       onDoubleClick={() =>
                         dblSelect(torrents.filter((t) => matchesStatus(t, item.key)).map((t) => t.id))
                       }
+                      data-nav-active={isActive ? 'true' : undefined}
                       className={cn(
-                        'w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-body transition-all tm-nav-item',
+                        'relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded-tile text-body transition-colors tm-nav-item',
                         isActive
-                          ? 'bg-primary/12 text-primary font-medium shadow-[inset_0_0_0_1px_rgba(0,122,255,0.18)]'
+                          ? 'text-primary font-medium'
                           : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8 hover:text-gray-800 dark:hover:text-gray-100',
                       )}
                     >
                       <Icon
-                        className="w-4 h-4 shrink-0"
-                        style={{ color: isActive ? 'var(--color-primary)' : item.color }}
+                        className={cn(
+                          'w-4 h-4 shrink-0',
+                          isActive
+                            ? 'text-primary'
+                            : item.key === 'error' && count > 0
+                              ? 'text-red-500'
+                              : 'text-gray-500 dark:text-gray-400',
+                        )}
                       />
                       <span className="flex-1 text-left truncate">{t(item.label)}</span>
                       {groupShowSize && size > 0 && (
-                        <span className="text-caption2 tm-mono text-gray-400">{formatBytes(size)}</span>
+                        <span className="text-caption1 tm-mono text-gray-400 tm-glass-label">{formatBytes(size)}</span>
                       )}
                       <span
                         className={cn(
@@ -410,7 +407,7 @@ export const DesktopSidebar: React.FC = () => {
                         className={cn(
                           'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
                           isActive
-                            ? 'bg-primary/12 text-primary font-medium'
+                            ? 'tm-nav-active text-primary font-medium'
                             : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                         )}
                         title={dir}
@@ -504,13 +501,14 @@ export const DesktopSidebar: React.FC = () => {
                         className={cn(
                           'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
                           isActive
-                            ? 'bg-red-500/10 text-red-500 font-medium'
+                            ? 'tm-nav-active text-red-600 dark:text-red-400 font-medium'
                             : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                         )}
-                        title={err}
+                        style={ERROR_TINT}
+                        title={translateError(err, t)}
                       >
                         <ShieldAlert className="w-3.5 h-3.5 shrink-0 opacity-70 text-red-500" />
-                        <span className="truncate flex-1 text-left">{err}</span>
+                        <span className="truncate flex-1 text-left">{translateError(err, t)}</span>
                         {groupShowSize && size > 0 && (
                           <span className="text-caption2 tm-mono text-gray-400">{formatBytes(size)}</span>
                         )}
@@ -552,27 +550,6 @@ export const DesktopSidebar: React.FC = () => {
           )}
         </div>
 
-        {/* fnOS 快捷方式 */}
-        <div className="shrink-0 border-t border-white/60 dark:border-white/10 px-3 py-2.5">
-          <SectionHeader icon={<Globe className="w-3.5 h-3.5" />} title={t('nav.fnosShortcuts')} />
-          <div className="grid grid-cols-2 gap-2 mt-1.5">
-            <button
-              onClick={() => void openDownloadDir()}
-              className="flex flex-col items-center gap-1 py-2.5 rounded-xl glass-panel text-caption1 text-gray-600 dark:text-gray-300 glass-hover hover:text-primary"
-            >
-              <FolderOpen className="w-4 h-4 text-primary" />
-              {t('action.openDownloadDir')}
-            </button>
-            <button
-              onClick={() => void configDir()}
-              className="flex flex-col items-center gap-1 py-2.5 rounded-xl glass-panel text-caption1 text-gray-600 dark:text-gray-300 glass-hover hover:text-primary"
-            >
-              <FolderCog className="w-4 h-4 text-primary" />
-              {t('action.configDir')}
-            </button>
-          </div>
-        </div>
-
       </div>
 
       {/* 右键菜单 */}
@@ -584,7 +561,7 @@ export const DesktopSidebar: React.FC = () => {
             onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); setSubmenuOpen(false) }}
           />
           <div
-            className="fixed z-50 min-w-44 rounded-xl glass-panel-strong p-1"
+            className="fixed z-50 min-w-44 rounded-tile glass-panel-strong p-1"
             style={{ left: Math.min(ctxMenu.x, window.innerWidth - 180), top: Math.min(ctxMenu.y, window.innerHeight - 220) }}
           >
             <CtxCheck
@@ -609,8 +586,8 @@ export const DesktopSidebar: React.FC = () => {
                   onMouseEnter={cancelSubmenuClose}
                   onMouseLeave={closeSubmenuSoon}
                   className={cn(
-                    // 实底背景避免嵌套玻璃面板的二次 backdrop-filter 模糊
-                    'absolute top-0 z-10 min-w-36 rounded-xl bg-white/95 dark:bg-gray-800/95 border border-gray-200/70 dark:border-white/10 p-1 shadow-xl',
+                    // 嵌在已模糊的一级面板内，再叠 backdrop-filter 会二次模糊，故保持实底
+                    'absolute top-0 z-10 min-w-36 rounded-tile bg-white/95 dark:bg-gray-800/95 border border-gray-200/70 dark:border-white/10 p-1 shadow-xl',
                     ctxMenu.x > window.innerWidth - 340 ? 'right-full mr-1' : 'left-full ml-1',
                   )}
                 >
@@ -629,7 +606,7 @@ export const DesktopSidebar: React.FC = () => {
                           isAll && 'cursor-default opacity-60 hover:bg-transparent dark:hover:bg-transparent',
                         )}
                       >
-                        <span className={cn('w-3.5 shrink-0 text-primary', visible ? 'opacity-100' : 'opacity-0')}>✓</span>
+                        <span className="w-3.5 shrink-0 flex justify-center text-primary">{visible && <Check className="w-3.5 h-3.5" strokeWidth={2.4} />}</span>
                         {t(item.label)}
                       </button>
                     )
@@ -692,7 +669,7 @@ function CtxCheck({ label, checked, onClick }: { label: string; checked: boolean
       onClick={onClick}
       className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-footnote text-left hover:bg-white/60 dark:hover:bg-white/10"
     >
-      <span className={cn('w-3.5 shrink-0 text-primary', checked ? 'opacity-100' : 'opacity-0')}>✓</span>
+      <span className="w-3.5 shrink-0 flex justify-center text-primary">{checked && <Check className="w-3.5 h-3.5" strokeWidth={2.4} />}</span>
       {label}
     </button>
   )
@@ -793,7 +770,7 @@ const SiteNav: React.FC<SiteNavProps> = ({ sites, siteStats, currentSiteIds, onS
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t('common.search')}
-              className="h-7 pl-8 text-footnote bg-white/50 dark:bg-white/5 border-white/60 dark:border-white/10 rounded-lg focus-visible:ring-primary/50"
+              className="h-8 pl-8 text-footnote bg-white/50 dark:bg-white/5 border-white/60 dark:border-white/10 rounded-lg focus-visible:ring-primary/50"
             />
           </div>
 
@@ -805,7 +782,7 @@ const SiteNav: React.FC<SiteNavProps> = ({ sites, siteStats, currentSiteIds, onS
               className={cn(
                 'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
                 currentSiteIds.length === 0
-                  ? 'bg-primary/12 text-primary font-medium'
+                  ? 'tm-nav-active text-primary font-medium'
                   : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
               )}
             >
@@ -829,7 +806,7 @@ const SiteNav: React.FC<SiteNavProps> = ({ sites, siteStats, currentSiteIds, onS
                   className={cn(
                     'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
                     isActive
-                      ? 'bg-primary/12 text-primary font-medium'
+                      ? 'tm-nav-active text-primary font-medium'
                       : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                   )}
                 >
@@ -854,7 +831,7 @@ const SiteNav: React.FC<SiteNavProps> = ({ sites, siteStats, currentSiteIds, onS
                 className={cn(
                   'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
                   currentSiteIds.includes('__other__')
-                    ? 'bg-primary/12 text-primary font-medium'
+                    ? 'tm-nav-active text-primary font-medium'
                     : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                 )}
               >
@@ -991,48 +968,29 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
 
   const activeStatus = filters.status[0] || 'all'
 
-  const openDownloadDir = async () => {
-    const dir = session?.downloadDir
-    if (!dir) return
-    const ok = await trimOpenPath(dir)
-    if (!ok) {
-      navigator.clipboard?.writeText(dir).catch(() => {})
-      toast.info(t('sidebar.openDirFallback', { dir }))
-    }
-  }
-  const configDir = async () => {
-    const picked = await trimPickFolder()
-    if (picked) {
-      navigator.clipboard?.writeText(picked).catch(() => {})
-      toast.success(t('sidebar.dirCopied', { dir: picked }))
-    } else {
-      toast.info(t('sidebar.configDirHint'))
-    }
-  }
-
   return (
-    <Dialog open={visible} onOpenChange={onClose}>
-      <DialogContent className="glass-panel-strong sm:max-w-sm h-[85vh] flex flex-col">
-        <DialogHeader className="border-b border-white/60 dark:border-white/10 pb-2">
-          <DialogTitle className="flex items-center gap-2">
+    <Sheet open={visible} onOpenChange={onClose}>
+      <SheetContent className="h-[78vh] sm:max-w-sm flex flex-col" onDismiss={onClose}>
+        <SheetHeader className="border-b border-white/60 dark:border-white/10 pb-2">
+          <SheetTitle className="flex items-center gap-2">
             <span className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] flex items-center justify-center">
               <span className="text-white font-bold text-footnote">TW</span>
             </span>
             <span className="text-primary">Transmission</span> WebUI <span className="text-gray-400 dark:text-gray-500 font-medium text-footnote">for fnOS</span>
-          </DialogTitle>
-        </DialogHeader>
+          </SheetTitle>
+        </SheetHeader>
 
         <div className="flex-1 overflow-y-auto space-y-4 py-3">
           {/* LiveStats */}
           <div className="grid grid-cols-2 gap-2">
-            <div className="glass-panel rounded-xl px-3 py-2.5 text-center">
+            <div className="glass-subcard rounded-tile px-3 py-2.5 text-center">
               <div className="flex items-center justify-center gap-1 text-caption1 text-gray-500 dark:text-gray-400 mb-0.5">
                 <ArrowDown className="w-3.5 h-3.5 text-green-500" />
                 {t('sidebar.download')}
               </div>
               <div className="tm-mono text-title2 font-semibold leading-tight text-green-500">{formatSpeed(totals.down)}</div>
             </div>
-            <div className="glass-panel rounded-xl px-3 py-2.5 text-center">
+            <div className="glass-subcard rounded-tile px-3 py-2.5 text-center">
               <div className="flex items-center justify-center gap-1 text-caption1 text-gray-500 dark:text-gray-400 mb-0.5">
                 <ArrowUp className="w-3.5 h-3.5 text-blue-500" />
                 {t('sidebar.upload')}
@@ -1042,7 +1000,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
           </div>
 
           {/* DiskRing */}
-          <div className="glass-panel rounded-xl px-3 py-2.5 flex items-center gap-3">
+          <div className="glass-subcard rounded-tile px-3 py-2.5 flex items-center gap-3">
             <svg width="52" height="52" viewBox="0 0 58 58" className="-rotate-90 shrink-0">
               <circle cx="29" cy="29" r="22" stroke="rgba(120,130,160,0.16)" strokeWidth="6.5" fill="none" />
               <circle
@@ -1085,11 +1043,16 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                     className={cn(
                       'w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-body transition-all tm-nav-item',
                       isActive
-                        ? 'bg-primary/12 text-primary font-medium'
+                        ? 'tm-nav-active text-primary font-medium'
                         : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                     )}
                   >
-                    <Icon className="w-4 h-4 shrink-0" style={{ color: isActive ? 'var(--color-primary)' : item.color }} />
+                    <Icon
+                      className={cn(
+                        'w-4 h-4 shrink-0',
+                        isActive ? 'text-primary' : item.key === 'error' && count > 0 ? 'text-red-500' : 'text-gray-500 dark:text-gray-400',
+                      )}
+                    />
                     <span className="flex-1 text-left truncate">{t(item.label)}</span>
                     <span
                       className={cn(
@@ -1136,7 +1099,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                         }}
                         className={cn(
                           'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
-                          isActive ? 'bg-primary/12 text-primary font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
+                          isActive ? 'tm-nav-active text-primary font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                         )}
                       >
                         <FolderOpen className="w-3.5 h-3.5 shrink-0 opacity-70" />
@@ -1175,12 +1138,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                         }}
                         className={cn(
                           'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
-                          isActive ? 'bg-red-500/12 text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
+                          isActive ? 'tm-nav-active text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                         )}
-                        title={msg}
+                        style={ERROR_TINT}
+                        title={translateError(msg, t)}
                       >
                         <AlertCircle className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                        <span className="truncate flex-1 text-left">{msg}</span>
+                        <span className="truncate flex-1 text-left">{translateError(msg, t)}</span>
                         <span className="text-caption2 tm-mono text-gray-400">{count}</span>
                       </button>
                     )
@@ -1247,7 +1211,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                   onClick={() => { setFilters({ sites: [] }); onClose() }}
                   className={cn(
                     'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
-                    filters.sites.length === 0 ? 'bg-primary/12 text-primary font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
+                    filters.sites.length === 0 ? 'tm-nav-active text-primary font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                   )}
                 >
                   <Globe className="w-3.5 h-3.5" />
@@ -1265,7 +1229,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                       onClick={() => { setFilters({ sites: isActive ? [] : [name] }); onClose() }}
                       className={cn(
                         'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
-                        isActive ? 'bg-primary/12 text-primary font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
+                        isActive ? 'tm-nav-active text-primary font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                       )}
                     >
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isActive ? 'var(--color-primary)' : 'var(--color-gray-300)' }} />
@@ -1279,7 +1243,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                     onClick={() => { setFilters({ sites: ['__other__'] }); onClose() }}
                     className={cn(
                       'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
-                      filters.sites.includes('__other__') ? 'bg-primary/12 text-primary font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
+                      filters.sites.includes('__other__') ? 'tm-nav-active text-primary font-medium' : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/8',
                     )}
                   >
                     <span className="w-2 h-2 rounded-full shrink-0 bg-gray-300" />
@@ -1292,26 +1256,6 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
             </div>
           )}
 
-          {/* fnOS 快捷方式 */}
-          <div>
-            <SectionHeader icon={<Globe className="w-3.5 h-3.5" />} title={t('nav.fnosShortcuts')} />
-            <div className="grid grid-cols-2 gap-2 mt-1.5">
-              <button
-                onClick={() => void openDownloadDir()}
-                className="flex flex-col items-center gap-1 py-2.5 rounded-xl glass-panel text-caption1 text-gray-600 dark:text-gray-300 glass-hover hover:text-primary"
-              >
-                <FolderOpen className="w-4 h-4 text-primary" />
-                {t('action.openDownloadDir')}
-              </button>
-              <button
-                onClick={() => void configDir()}
-                className="flex flex-col items-center gap-1 py-2.5 rounded-xl glass-panel text-caption1 text-gray-600 dark:text-gray-300 glass-hover hover:text-primary"
-              >
-                <FolderCog className="w-4 h-4 text-primary" />
-                {t('action.configDir')}
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* 底部：设置入口（抽屉覆盖顶栏时保持可及） */}
@@ -1321,7 +1265,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
             {t('common.settings')}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   )
 }

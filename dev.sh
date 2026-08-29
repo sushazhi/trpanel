@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 DEV_DIR="$ROOT/dev"
 DATA_DIR="$DEV_DIR/data"
 LOG_DIR="$DEV_DIR/logs"
-mkdir -p "$DATA_DIR" "$LOG_DIR"
+mkdir -p "$DATA_DIR" "$LOG_DIR" "$DEV_DIR/air"   # air 为后端热重载的构建输出目录
 
 echo "[dev] 开发产物目录: $DEV_DIR"
 echo "[dev]   后端状态文件 -> $DATA_DIR"
@@ -35,7 +35,17 @@ done
 # 后端运行时数据写入 dev/data，而非代码目录
 export TM_DATA_DIR="$DATA_DIR"
 
-( cd "$ROOT/backend"  && go run ./cmd/server ) >"$LOG_DIR/backend.log" 2>&1 &
+# 后端：装了 air 则启用热重载（.go 变更自动重编译重启），否则回退 go run
+if command -v air >/dev/null 2>&1; then
+  echo "[dev] 后端热重载：air（.go 变更自动重编译重启）"
+  BACKEND_CMD="air"
+else
+  echo "[dev] 未检测到 air，后端改动需手动重启"
+  echo "[dev]   安装：go install github.com/air-verse/air@latest"
+  BACKEND_CMD="go run ./cmd/server"
+fi
+
+( cd "$ROOT/backend"  && $BACKEND_CMD ) >"$LOG_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
 
 ( cd "$ROOT/frontend" && pnpm dev )           >"$LOG_DIR/frontend.log" 2>&1 &
@@ -64,10 +74,10 @@ echo "[dev] 已启动 后端PID=$BACKEND_PID 前端PID=$FRONTEND_PID"
 
 if [ "$BG" -eq 0 ]; then
   trap cleanup EXIT INT TERM
-  echo "[dev] 前端 http://localhost:5173  后端 http://localhost:8080"
+  echo "[dev] 前端 http://localhost:5173  后端 http://localhost:8200"
   echo "[dev] 按 Ctrl+C 退出"
   wait
 else
-  echo "[dev] 前端 http://localhost:5173  后端 http://localhost:8080"
+  echo "[dev] 前端 http://localhost:5173  后端 http://localhost:8200"
   echo "[dev] 后台模式已启动，日志见 $LOG_DIR"
 fi

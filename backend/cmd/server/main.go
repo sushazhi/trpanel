@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,6 +24,9 @@ import (
 	"github.com/transmission-manager/backend/internal/automove"
 	"github.com/transmission-manager/backend/internal/config"
 	"github.com/transmission-manager/backend/internal/middleware"
+	"github.com/transmission-manager/backend/internal/platform"
+	// 空导入即完成 fnOS 平台注册；不导入时服务自动降级为通用部署
+	_ "github.com/transmission-manager/backend/internal/platform/fnos"
 	"github.com/transmission-manager/backend/internal/rpc"
 	"github.com/transmission-manager/backend/internal/rss"
 	"github.com/transmission-manager/backend/internal/state"
@@ -31,6 +39,7 @@ func main() {
 		slog.Error("加载配置失败", "err", err)
 		os.Exit(1)
 	}
+	setupLogLevel(cfg.LogLevel)
 
 	// 创建 RPC 管理器（支持运行期热更新连接）
 	manager, err := rpc.NewManager(cfg.TransmissionURL, cfg.User, cfg.Password)
@@ -49,12 +58,27 @@ func main() {
 		slog.Info("已连接 Transmission", "version", version)
 	}
 
+	// 宿主平台：把网关前缀、安全策略、文件访问白名单等环境差异收敛到一处。
+	// 未显式指定时按 GATEWAY_PREFIX / 宿主注入的环境变量推断，默认通用部署。
+	gatewayPrefix := cfg.GatewayPrefix
+	if gatewayPrefix != "" && !gatewayPrefixRe.MatchString(gatewayPrefix) {
+		slog.Error("GATEWAY_PREFIX 非法：必须是以 / 开头的纯路径段", "value", gatewayPrefix)
+		os.Exit(1)
+	}
+	plat := platform.Detect(cfg.Platform, platform.Config{
+		GatewayPrefix: gatewayPrefix,
+		// 「按路径添加种子」允许读取的根目录：配置项 + 数据目录
+		FileAllowedPrefixes: append(append([]string{}, cfg.TorrentPathRoots...), cfg.DataDir),
+	})
+	slog.Info("宿主平台已就绪", "platform", plat.ID(),
+		"gatewayPrefix", gatewayPrefix, "registered", strings.Join(platform.Registered(), ","))
+
 	// Gin 引擎
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	r.Use(gin.Recovery(), middleware.Logger(), middleware.SecurityHeaders(), middleware.CORS())
+	r.Use(gin.Recovery(), middleware.Logger(), middleware.SecurityHeaders(plat), middleware.CORS(plat))
 
 	// GeoIP 服务（mmdb 文件缺失时自动降级为空查询）
 	geo := api.NewGeoService("mmdb/GeoLite2-City.mmdb")
@@ -67,31 +91,68 @@ func main() {
 	}
 
 	// 注册 API 与 WebSocket
-	hub := api.NewHub(manager, cfg.PollInterval)
+	hub := api.NewHub(manager, cfg.PollInterval, plat)
 	rssSvc := rss.New(manager, store)
 	moveSvc := automove.New(manager, store)
-	handler := api.NewHandler(manager, hub, geo, store, rssSvc, moveSvc, cfg.DataDir)
-	handler.Register(r)
+	handler := api.NewHandler(manager, hub, geo, store, rssSvc, moveSvc, cfg, plat)
+	handler.Register(r, gatewayPrefix)
 	hub.Start(ctx)
 	go rssSvc.Run(ctx)
 	go moveSvc.Run(ctx)
 
 	// 内嵌前端静态资源（SPA）
-	serveStatic(r)
+	serveStatic(r, plat.GatewayPrefix())
 
-	// HTTP 服务
+	// HTTP 服务：默认 TCP 监听（SERVER_HOST/SERVER_PORT 控制）；
+	// 网关模式通过 SERVER_SOCKET 指定 Unix socket（fnOS 统一网关入口）
+	socketPath := os.Getenv("SERVER_SOCKET")
 	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("HTTP 服务启动失败", "err", err)
+	if socketPath != "" {
+		_ = os.Remove(socketPath)
+		ln, err := net.Listen("unix", socketPath)
+		if err != nil {
+			slog.Error("Unix socket 监听失败", "err", err)
 			os.Exit(1)
 		}
-	}()
-	slog.Info("服务已启动", "addr", srv.Addr)
+		// socket 权限：默认沿用 0666 以免网关以其它身份接入时断连，
+		// 确认过属主/组关系后可用 SERVER_SOCKET_MODE=0660 收紧
+		mode := socketMode()
+		if mode&0o077 != 0 {
+			slog.Warn("Unix socket 权限过宽，本机任意用户均可调用管理接口", "sock", socketPath, "mode", fmt.Sprintf("%04o", mode))
+		}
+		if err := os.Chmod(socketPath, mode); err != nil {
+			slog.Warn("设置 socket 权限失败", "sock", socketPath, "err", err)
+		}
+		go func() {
+			if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+				slog.Error("HTTP 服务启动失败", "err", err)
+				os.Exit(1)
+			}
+		}()
+		slog.Info("服务已启动", "sock", socketPath)
+	} else {
+		host := cfg.Host
+		if !middleware.IsLoopback(host) && cfg.APIToken == "" && os.Getenv("ALLOW_INSECURE_REMOTE") != "1" {
+			slog.Error("拒绝在非回环地址上无鉴权监听",
+				"host", host,
+				"hint", "本服务默认可被任意调用；如需对外暴露，请设置 API_TOKEN 启用令牌鉴权，或显式设置 ALLOW_INSECURE_REMOTE=1 确认自担风险")
+			os.Exit(1)
+		}
+		if cfg.APIToken == "" {
+			slog.Warn("未启用令牌鉴权，任何可达本端口的客户端均可完整控制 Transmission", "host", host)
+		}
+		srv.Addr = net.JoinHostPort(host, cfg.Port)
+		go func() {
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("HTTP 服务启动失败", "err", err)
+				os.Exit(1)
+			}
+		}()
+		slog.Info("服务已启动", "addr", srv.Addr)
+	}
 
 	// 优雅退出
 	quit := make(chan os.Signal, 1)
@@ -105,8 +166,45 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
+// gatewayPrefixRe 网关前缀白名单：以 / 开头的纯路径段。
+// 该值会被写入 index.html 的属性与重写后的资源 URL，故禁止引号、尖括号、空白与控制字符。
+var gatewayPrefixRe = regexp.MustCompile(`^/[A-Za-z0-9._~/-]*$`)
+
+// setupLogLevel 按 LOG_LEVEL 配置全局 slog（此前该配置项无人消费）
+func setupLogLevel(level string) {
+	var lvl slog.Level
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		lvl = slog.LevelDebug
+	case "warn":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	case "", "info":
+		lvl = slog.LevelInfo
+	default:
+		slog.Warn("LOG_LEVEL 无法识别，按 info 处理", "value", level)
+		lvl = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})))
+}
+
+// socketMode 解析 SERVER_SOCKET_MODE（八进制），缺省 0666 以兼容既有网关部署
+func socketMode() fs.FileMode {
+	raw := strings.TrimSpace(os.Getenv("SERVER_SOCKET_MODE"))
+	if raw == "" {
+		return 0o666
+	}
+	v, err := strconv.ParseUint(raw, 8, 32)
+	if err != nil || v > 0o777 {
+		slog.Warn("SERVER_SOCKET_MODE 非法，按默认值 0666 处理", "value", raw)
+		return 0o666
+	}
+	return fs.FileMode(v)
+}
+
 // serveStatic 通过 embed 提供前端静态文件，并支持 SPA 路由回退
-func serveStatic(r *gin.Engine) {
+func serveStatic(r *gin.Engine, gatewayPrefix string) {
 	sub, err := fs.Sub(static.StaticFiles, "web/dist")
 	if err != nil {
 		slog.Error("内嵌静态资源加载失败", "err", err)
@@ -117,15 +215,44 @@ func serveStatic(r *gin.Engine) {
 		slog.Error("读取 index.html 失败", "err", err)
 		return
 	}
+	// 网关模式：注入前端基础路径（API/WS 拼接前缀使用）并重写 HTML 中的资源路径。
+	// Vite base='./' 下 index.html 的 script/link 是相对路径（./assets/...），
+	// 一旦文档 URL 不带结尾斜杠（/app/transmission）浏览器就会解析到上一级导致 404，
+	// 因此两种写法（/assets 与 ./assets）都要显式拼上网关前缀。
+	if gatewayPrefix != "" {
+		// 前缀已在入口做过字符白名单校验，不可能出现引号/尖括号，故直接写入属性值
+		inject := `<meta name="app-base" content="` + gatewayPrefix + `">`
+		index = bytes.Replace(index, []byte("<head>"), []byte("<head>"+inject), 1)
+		for _, attr := range []string{`src="`, `href="`} {
+			// 顺序不可调换：先绝对路径再相对路径，否则后一轮会命中上一轮的产出而重复加前缀
+			for _, val := range []string{`/`, `./`} {
+				index = bytes.ReplaceAll(index, []byte(attr+val), []byte(attr+gatewayPrefix+`/`))
+			}
+		}
+	}
 	r.NoRoute(func(c *gin.Context) {
+		// 网关模式下静态资源/SPA 路径带前缀，剥离后再按 embed 文件处理
+		p := c.Request.URL.Path
+		if gatewayPrefix != "" && strings.HasPrefix(p, gatewayPrefix) {
+			p = strings.TrimPrefix(p, gatewayPrefix)
+			if p == "" {
+				p = "/"
+			}
+		}
 		// API 未命中返回 JSON 404（避免前端拿到 HTML 造成解析错误）
-		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		if strings.HasPrefix(p, "/api/") {
 			c.JSON(http.StatusNotFound, gin.H{"code": 1, "message": "接口不存在"})
 			return
 		}
-		path := strings.TrimPrefix(c.Request.URL.Path, "/")
+		path := strings.TrimPrefix(p, "/")
 		if path == "" {
 			path = "index.html"
+		}
+		// 首页 / SPA 回退：一律使用重写后的 index（网关模式已注入前缀），
+		// 否则会从 embed 返回原始文件导致资源路径无前缀而 404
+		if path == "index.html" {
+			c.Data(http.StatusOK, "text/html; charset=utf-8", index)
+			return
 		}
 		if data, err := fs.ReadFile(sub, path); err == nil {
 			ct := mime.TypeByExtension(filepath.Ext(path))

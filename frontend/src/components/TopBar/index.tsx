@@ -1,7 +1,9 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Check,
+  FolderCog,
   FolderInput,
+  FolderOpen,
   Globe,
   Menu,
   Pause,
@@ -18,6 +20,8 @@ import {
 import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
+import { useRevealPath } from '@/hooks/useRevealPath'
+import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
@@ -53,15 +57,15 @@ function ToolBtn({ icon: Icon, title, onClick, danger, disabled, large }: {
       aria-label={title}
       className={cn(
         large ? 'h-11 w-11' : 'h-9 w-9',
-        'flex items-center justify-center rounded-full transition-all shrink-0 active:scale-90',
+        'tm-press flex items-center justify-center rounded-full shrink-0',
         disabled
-          ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed active:scale-100'
+          ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
           : danger
             ? 'text-gray-500 dark:text-gray-400 hover:text-red-500 hover:bg-red-500/10'
             : 'text-gray-500 dark:text-gray-400 hover:text-primary hover:bg-primary/10',
       )}
     >
-      <Icon className={large ? 'w-6 h-6' : 'w-5 h-5'} strokeWidth={1.8} />
+      <Icon className={large ? 'w-6 h-6' : 'w-5 h-5'} strokeWidth={1.75} />
     </button>
   )
 }
@@ -85,6 +89,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   const setFilters = useAppStore((s) => s.setFilters)
   const selectedIds = useAppStore((s) => s.selectedIds)
   const clearSelection = useAppStore((s) => s.clearSelection)
+  const session = useAppStore((s) => s.session)
   const theme = useAppStore((s) => s.theme)
   const themePreset = useAppStore((s) => s.themePreset)
   const setTheme = useAppStore((s) => s.setTheme)
@@ -92,6 +97,8 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   const language = useAppStore((s) => s.language)
   const setLanguage = useAppStore((s) => s.setLanguage)
   const actions = useTorrentActions()
+  const { can, pickFolder } = usePlatform()
+  const revealPath = useRevealPath()
   const [avatarOpen, setAvatarOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
@@ -115,6 +122,29 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
     setFilters({ status: ['all'], sites: [], downloadDirs: [], labels: [], error: [], search: '' })
   }
 
+  // 宿主快捷操作：打开下载目录 / 选取配置目录（无宿主能力时复制路径兜底）
+  const openDownloadDir = async () => {
+    const dir = session?.downloadDir
+    if (!dir) return
+    await revealPath(dir)
+  }
+  const configDir = async () => {
+    const picked = await pickFolder()
+    if (picked) {
+      navigator.clipboard?.writeText(picked).catch(() => {})
+      toast.success(t('sidebar.dirCopied', { dir: picked }))
+    } else {
+      toast.info(t('sidebar.configDirHint'))
+    }
+  }
+
+  // 搜索框是压扁而非卸载，光标否则会留在看不见的输入框里
+  useEffect(() => {
+    if (!isMobile || !hasSelection) return
+    const el = document.activeElement
+    if (el instanceof HTMLElement && el.dataset.searchInput !== undefined) el.blur()
+  }, [isMobile, hasSelection])
+
   // 批量校验 / 重新通告（循环调用单种子接口，统一提示）
   const runLoop = async (fn: (id: number) => Promise<unknown>, key: string) => {
     if (selectedIds.length === 0) return
@@ -131,7 +161,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   }
 
   return (
-    <header className="shrink-0 glass-panel-strong rounded-2xl px-3 sm:px-4 py-2 z-30 select-none">
+    <header className="tm-dock glass-panel rounded-dock px-3 sm:px-4 py-2 select-none">
       <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
         {/* 移动端抽屉按钮 */}
         {isMobile && onOpenDrawer && (
@@ -156,22 +186,29 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
           </div>
         </div>
 
-        {/* 搜索：移动端选中时收起（编辑模式），让位给批量操作；无选中时相对整行居中 */}
-        {!(isMobile && hasSelection) && (
-          <div className={cn('min-w-0', hasSelection ? 'flex-1 max-w-md' : 'mx-auto w-full max-w-md')}>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                id="search-input"
-                data-search-input
-                value={search}
-                onChange={(e) => setFilters({ search: e.target.value })}
-                placeholder={t('topbar.searchPlaceholder')}
-                className="h-9 pl-9 pr-3 rounded-full bg-white/60 dark:bg-white/10 border-transparent shadow-inner text-body focus-visible:ring-primary/50"
-              />
-            </div>
+        {/* 搜索：移动端选中时 spring 收缩让位给批量操作；无选中时相对整行居中 */}
+        <div
+          className={cn(
+            'min-w-0 flex items-center transition-[width,opacity,transform,scale] duration-[350ms] [transition-timing-function:var(--ease-spring)]',
+            isMobile && hasSelection
+              ? 'w-0 opacity-0 scale-90 pointer-events-none'
+              : hasSelection
+                ? 'flex-1 max-w-md'
+                : 'mx-auto w-full max-w-md',
+          )}
+        >
+          <div className="relative w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              id="search-input"
+              data-search-input
+              value={search}
+              onChange={(e) => setFilters({ search: e.target.value })}
+              placeholder={t('topbar.searchPlaceholder')}
+              className="h-9 pl-9 pr-3 rounded-full bg-white/60 dark:bg-white/10 border-transparent shadow-inner text-body focus-visible:ring-primary/50"
+            />
           </div>
-        )}
+        </div>
 
         {/* 批量操作 + 标签筛选 + 重置（选中时出现在同一行，窄屏横向滚动） */}
         {hasSelection && (
@@ -217,10 +254,19 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
           {/* 排序 / 视图 / 刷新 / 统计（桌面端并入顶栏，移动端在 ListHeader） */}
           {!isMobile && <ListControls compact onOpenDashboard={onOpenDashboard} />}
 
+          {/* 宿主快捷操作：仅桌面端 + 宿主支持文件管理器时显示 */}
+          {!isMobile && can('fs.revealPath') && (
+            <>
+              <span className="w-px h-5 bg-gray-200 dark:bg-white/10 mx-0.5 shrink-0" aria-hidden />
+              <ToolBtn icon={FolderOpen} title={t('action.openDownloadDir')} onClick={() => void openDownloadDir()} />
+              <ToolBtn icon={FolderCog} title={t('action.configDir')} onClick={() => void configDir()} />
+            </>
+          )}
+
           {!isMobile && (
             <Button
               onClick={onOpenAdd}
-              className="h-9 sm:h-10 w-9 sm:w-auto px-0 sm:px-4 rounded-full bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/30 gap-1.5 text-body font-medium"
+              className="tm-btn-primary tm-press h-9 sm:h-10 w-9 sm:w-auto px-0 sm:px-4 rounded-full text-white gap-1.5 text-body font-medium"
               aria-label={t('topbar.addTask')}
             >
               <Plus className="w-4 h-4" />
@@ -248,7 +294,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
                       key={m}
                       onClick={() => setTheme(m)}
                       className={cn(
-                        'flex-1 h-7 rounded-md text-footnote font-medium transition-colors',
+                        'flex-1 h-8 rounded-md text-footnote font-medium transition-colors',
                         theme === m
                           ? 'bg-white dark:bg-gray-700 text-primary shadow-sm'
                           : 'text-gray-500 hover:text-gray-700 dark:text-gray-400',
@@ -266,7 +312,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
                       title={t(`theme.preset.${p.id}`)}
                       aria-label={t(`theme.preset.${p.id}`)}
                       className={cn(
-                        'w-7 h-7 rounded-full flex items-center justify-center transition-transform hover:scale-110 active:scale-90',
+                        'w-8 h-8 rounded-full flex items-center justify-center transition-transform hover:scale-110 active:scale-90',
                         themePreset === p.id && 'ring-2 ring-offset-2 ring-offset-white/80 dark:ring-offset-gray-900',
                       )}
                       style={{

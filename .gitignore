@@ -30,3 +30,4 @@ backend/.env.local
 # ===== OS =====
 .DS_Store
 Thumbs.db
+backend/transmission-manager-linux-arm64

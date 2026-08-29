@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/transmission-manager/backend/internal/platform"
 	"github.com/transmission-manager/backend/internal/rpc"
 )
 
@@ -26,22 +26,9 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 4096,
-	// Origin 校验（配合 /ws 令牌鉴权）：仅允许同源或本机开发源
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true // 非浏览器客户端不带 Origin
-		}
-		u, err := url.Parse(origin)
-		if err != nil {
-			return false
-		}
-		if u.Host == r.Host {
-			return true
-		}
-		h := u.Hostname()
-		return h == "localhost" || h == "127.0.0.1"
-	},
+	// Origin 校验统一在 HandleWS 中按宿主平台策略执行：
+	// upgrader 是包级变量，拿不到平台实例，故此处先放行。
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 // wsClient 单个 WebSocket 客户端
@@ -53,26 +40,30 @@ type wsClient struct {
 // Hub WebSocket 广播中心
 type Hub struct {
 	rpc          *rpc.Manager
+	plat         platform.Platform
 	pollInterval atomic.Int64 // 纳秒，支持运行期热调整
 
 	mu          sync.RWMutex
 	lastData    []byte // 最近一次推送的全量数据缓存
-	pollMu      sync.Mutex
 	clients     map[*wsClient]struct{}
 	clientCount atomic.Int64
 	register    chan *wsClient
 	unregister  chan *wsClient
 	broadcast   chan []byte
+	// bump 唤醒拉取协程（容量 1，多次 Bump 合并为一次补拉）
+	bump chan struct{}
 }
 
-// NewHub 创建 Hub
-func NewHub(manager *rpc.Manager, interval time.Duration) *Hub {
+// NewHub 创建 Hub（plat 提供 WebSocket 握手的同源判定策略）
+func NewHub(manager *rpc.Manager, interval time.Duration, plat platform.Platform) *Hub {
 	h := &Hub{
 		rpc:         manager,
+		plat:        plat,
 		clients:     make(map[*wsClient]struct{}),
 		register:    make(chan *wsClient),
 		unregister:  make(chan *wsClient),
 		broadcast:   make(chan []byte, 16),
+		bump:        make(chan struct{}, 1),
 	}
 	h.pollInterval.Store(interval.Nanoseconds())
 	return h
@@ -89,9 +80,10 @@ func (h *Hub) SetPollInterval(interval time.Duration) {
 		interval = 500 * time.Millisecond
 	}
 	h.pollInterval.Store(interval.Nanoseconds())
+	h.Signal()
 }
 
-// Start 启动轮询与事件循环
+// Start 启动广播与唯一的拉取协程（串行拉取，避免并发请求互相覆盖）
 func (h *Hub) Start(ctx context.Context) {
 	go h.run()
 	go h.pollLoop(ctx)
@@ -137,44 +129,60 @@ func (h *Hub) run() {
 }
 
 func (h *Hub) pollLoop(ctx context.Context) {
-	h.poll() // 立即先拉一次，预热缓存
 	for {
-		select {
-		case <-ctx.Done():
+		// 无客户端时跳过拉取，避免对 Transmission 无意义的高频请求；
+		// 首个客户端接入时 Bump 会唤醒这里补一次
+		if h.clientCount.Load() > 0 {
+			h.pollLocked()
+		} else if !h.hasLastData() {
+			h.pollLocked() // 启动预热，保证静态首屏有数据
+		}
+		if !h.wait(ctx) {
 			return
-		case <-time.After(h.getPollInterval()):
-			// 无客户端时跳过轮询，避免对 Transmission 无意义的高频请求
-			if h.clientCount.Load() == 0 {
-				continue
-			}
-			h.poll()
 		}
 	}
 }
 
-// Bump 变更后立即拉取并广播（异步；已有轮询在跑时跳过，其结果会覆盖本次变更）
-func (h *Hub) Bump() {
-	if !h.pollMu.TryLock() {
-		return
+// wait 等待一个轮询周期；期间被 Signal/Bump 唤醒则立即返回，
+// 返回 false 表示上下文已取消（进程退出）
+func (h *Hub) wait(ctx context.Context) bool {
+	timer := time.NewTimer(h.getPollInterval())
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	case <-h.bump:
+		return true
 	}
-	go func() {
-		defer h.pollMu.Unlock()
-		h.pollLocked()
-	}()
 }
 
-// poll 拉取全量种子并广播（串行执行）
-func (h *Hub) poll() {
-	h.pollMu.Lock()
-	defer h.pollMu.Unlock()
-	h.pollLocked()
+// hasLastData 是否已有可推送的缓存数据
+func (h *Hub) hasLastData() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.lastData != nil
 }
 
-// pollLocked 实际拉取逻辑（调用方需持有 pollMu；数据无变化时跳过广播）
+// Signal 打断等待，尽快拉取一次（合并短时间内多次信号）
+func (h *Hub) Signal() {
+	select {
+	case h.bump <- struct{}{}:
+	default:
+	}
+}
+
+// Bump 数据变更后尽快拉取并广播。
+// 旧实现在已有拉取在跑时直接丢弃本次请求，而那次拉取可能早于本次变更，
+// 导致最后一次变更要等到下个轮询周期才可见。
+func (h *Hub) Bump() { h.Signal() }
+
+// pollLocked 实际拉取逻辑（仅由 pollLoop 单协程调用；数据无变化时跳过广播）
 func (h *Hub) pollLocked() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	torrents, err := h.rpc.Client().GetTorrents(ctx)
+	torrents, err := h.rpc.Client().GetTorrentsFresh(ctx)
 	if err != nil {
 		slog.Error("轮询种子失败", "err", err)
 		return
@@ -206,6 +214,14 @@ func (h *Hub) pollLocked() {
 
 // HandleWS 处理 WebSocket 连接
 func (h *Hub) HandleWS(c *gin.Context) {
+	// 与写接口共用同一套同站判定：仅放行同源、开发前端源，
+	// 以及网关模式下 X-Forwarded-Host 指向的真实主机。
+	// 否则任意网页都能在受害者浏览器里静默订阅全量种子数据（名称/路径/磁力链接）。
+	if origin := c.Request.Header.Get("Origin"); origin != "" &&
+		!h.plat.SecurityPolicy().IsSameSiteOrigin(c.Request, origin) {
+		respondError(c, http.StatusForbidden, "Origin 不被信任")
+		return
+	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		slog.Error("升级 WebSocket 失败", "err", err)

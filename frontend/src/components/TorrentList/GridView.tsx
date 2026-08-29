@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/stores/appStore'
-import { formatBytes, formatDuration, formatPercent, formatSpeed } from '@/utils/format'
+import { formatBytes, formatDuration, formatRatio, formatSpeed } from '@/utils/format'
 import { tagColor } from '@/utils/tagColor'
 import type { EditMode, EditTarget } from '@/components/TorrentMenu'
 import { buildTorrentMenu, EditModals, TorrentMenuDropdown } from '@/components/TorrentMenu'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
-import { trimOpenPath, useTrimEnv } from '@/hooks/useTrimEnv'
+import { useRevealPath } from '@/hooks/useRevealPath'
+import { usePlatform } from '@/platform'
 import { RemoveTorrentDialog, ReplaceTrackerDialog } from '@/components/ToolsDialogs'
 import { toast } from '@/lib/toast'
 import { Checkbox } from '@/components/ui/checkbox'
+import { ProgressBar } from '@/components/TorrentList/ProgressBar'
 import { cn } from '@/lib/utils'
 import { MoreVertical } from 'lucide-react'
 import type { Torrent } from '@/types'
@@ -34,8 +36,10 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
 }) {
   const { t } = useTranslation()
   const actions = useTorrentActions()
-  const { isTrimOS } = useTrimEnv()
+  const { can } = usePlatform()
+  const revealPath = useRevealPath()
   const selectedIds = useAppStore((s) => s.selectedIds)
+  const showCheckboxes = useAppStore((s) => s.showCheckboxes)
   const toggleSelect = useAppStore((s) => s.toggleSelect)
   const setSelection = useAppStore((s) => s.setSelection)
   const selectAnchorId = useAppStore((s) => s.selectAnchorId)
@@ -97,19 +101,22 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
     else if (key === 'copyName') { void navigator.clipboard?.writeText(torrent.name).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
     else if (key === 'copyPath') { void navigator.clipboard?.writeText(torrent.downloadDir).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
     else if (key === 'remove') setRemoveIds([id])
-    else if (key === 'openDir') { void trimOpenPath(torrent.downloadDir || '') }
+    else if (key === 'openDir') { void revealPath(torrent.downloadDir || '') }
     else if (key === 'deleteCompleted') onOpenBatchClean?.()
   }
 
   return (
-    <div className={cn('h-full overflow-auto px-3', isMobile ? 'pb-28' : 'pb-3')}>
+    <div
+      className="tm-scroll h-full"
+      style={{ paddingLeft: 'calc(var(--safe-left) + 0.75rem)', paddingRight: 'calc(var(--safe-right) + 0.75rem)' }}
+    >
       <div className="flex flex-col gap-2.5 max-w-5xl mx-auto">
         {torrents.map((torrent) => {
           const menuItems = buildTorrentMenu({
             actions,
             t: (k: string) => t(k),
             onOpenDetail,
-            isTrimOS,
+            canRevealPath: can('fs.revealPath'),
             onEdit: (mode: EditMode, tt: Torrent) => setEditTarget({ torrent: tt, mode }),
             onOpenBatchClean,
           }, torrent)
@@ -118,14 +125,17 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
           const dot = statusDotColor(torrent)
           const labels = torrent.labels ?? []
           const eta = torrent.eta > 0 ? `${t('card.remaining')} ${formatEtaShort(torrent.eta)}` : ''
+          // 已完成（含做种中/暂停）：显示分享率；未完成：显示「已下载 / 总大小」
+          const isDone = torrent.percentDone >= 1
           return (
             <TorrentMenuDropdown key={torrent.id} items={menuItems} onClick={handleMenuClick(torrent)} trigger="contextMenu" align="start">
               <div
                 onClick={(e) => handleSelect(torrent, e)}
                 onDoubleClick={() => onOpenDetail(torrent)}
+                data-selected={selected || undefined}
                 className={cn(
                   'glass-card flex items-start gap-3.5 p-3.5 cursor-default select-none group',
-                  selected && 'shadow-[inset_0_0_0_1.5px_var(--color-primary)] bg-primary/6',
+                  selected && 'z-[1]',
                 )}
               >
                 <div className="flex-1 min-w-0">
@@ -156,9 +166,11 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                         )}
                       </span>
                     )}
-                    <span className="shrink-0 tm-reveal-hover" onClick={(e) => e.stopPropagation()}>
-                      <Checkbox checked={selected} onCheckedChange={() => { toggleSelect(torrent.id); setSelectAnchor(torrent.id) }} />
-                    </span>
+                    {showCheckboxes && (
+                      <span className="shrink-0 tm-reveal-hover" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={selected} onCheckedChange={() => { toggleSelect(torrent.id); setSelectAnchor(torrent.id) }} />
+                      </span>
+                    )}
                     {/* ⋮ 菜单（触屏设备显示；鼠标设备用右键菜单） */}
                     <span className="tm-touch-menu shrink-0" onClick={(e) => e.stopPropagation()}>
                       <TorrentMenuDropdown items={menuItems} onClick={handleMenuClick(torrent)} trigger="click">
@@ -169,36 +181,15 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                     </span>
                   </div>
 
-                  {/* 进度条（scaleX 驱动） */}
+                  {/* 进度条（scaleX 驱动）+ 移动端标签靠右 */}
                   <div className="flex items-center gap-2.5 mt-2">
-                    <div className="tm-progress-track flex-1">
-                      <div
-                        className={cn('tm-progress-fill', torrent.error > 0 && 'tm-progress-fill--error')}
-                        style={{ transform: `scaleX(${pct})` }}
-                      />
-                    </div>
+                    <ProgressBar value={pct} error={torrent.error > 0} className="flex-1" />
                     <span
                       className={cn('w-2 h-2 rounded-full shrink-0', dot.pulse && 'animate-pulse')}
                       style={{ backgroundColor: dot.color }}
                     />
-                    <span className="tm-mono text-footnote text-gray-500 dark:text-gray-400 w-11 text-right shrink-0">
-                      {formatPercent(pct, 0)}
-                    </span>
-                  </div>
-
-                  {/* 元信息 */}
-                  <div className="flex items-center gap-2.5 text-footnote text-gray-500 dark:text-gray-400 mt-1.5 flex-wrap">
-                    <span className="tm-mono text-green-600 dark:text-green-400">↓{formatSpeed(torrent.rateDownload)}</span>
-                    <span className="tm-mono text-blue-600 dark:text-blue-400">↑{formatSpeed(torrent.rateUpload)}</span>
-                    {eta && <span>· {eta}</span>}
-                    <span>· {t('card.peersWithCount', { from: torrent.peersSendingToUs, total: torrent.peersConnected })}</span>
-                    <span className="text-gray-300 dark:text-gray-600 hidden sm:inline">·</span>
-                    <span className="hidden sm:inline">{formatBytes(torrent.totalSize)}</span>
-                    {torrent.percentDone >= 1 && torrent.secondsSeeding > 0 && (
-                      <span className="text-gray-400 dark:text-gray-500">· {t('card.seeding')} {formatDuration(torrent.secondsSeeding)}</span>
-                    )}
                     {labels.length > 0 && (
-                      <span className="md:hidden flex items-center gap-1.5 ml-auto">
+                      <span className="md:hidden flex items-center gap-1.5 shrink-0">
                         {labels.slice(0, 2).map((l) => {
                           const color = tagColor(l)
                           return (
@@ -209,6 +200,26 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                         })}
                         {labels.length > 2 && <span className="text-caption1 text-gray-400">+{labels.length - 2}</span>}
                       </span>
+                    )}
+                  </div>
+
+                  {/* 元信息 */}
+                  <div className="flex items-center gap-2.5 text-footnote text-gray-500 dark:text-gray-400 mt-1.5 flex-wrap">
+                    <span className="tm-mono text-green-600 dark:text-green-400">↓{formatSpeed(torrent.rateDownload)}</span>
+                    <span className="tm-mono text-blue-600 dark:text-blue-400">↑{formatSpeed(torrent.rateUpload)}</span>
+                    {eta && <span>· {eta}</span>}
+                    {/* 未完成：已下载 / 总大小；已完成：分享率（桌面补充总大小） */}
+                    {isDone ? (
+                      <>
+                        <span className="tm-mono">· {t('columns.ratio')} {formatRatio(torrent.uploadRatio)}</span>
+                        <span className="text-gray-300 dark:text-gray-600 hidden sm:inline">·</span>
+                        <span className="hidden sm:inline">{formatBytes(torrent.totalSize)}</span>
+                      </>
+                    ) : (
+                      <span className="tm-mono">· {formatBytes(torrent.downloadedEver)} / {formatBytes(torrent.totalSize)}</span>
+                    )}
+                    {isDone && torrent.secondsSeeding > 0 && (
+                      <span className="text-gray-400 dark:text-gray-500">· {t('card.seeding')} {formatDuration(torrent.secondsSeeding)}</span>
                     )}
                   </div>
                 </div>

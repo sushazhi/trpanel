@@ -1,63 +1,154 @@
+import { useEffect, useRef, useState, type RefObject } from 'react'
+import { Eraser, FolderOpen, Magnet, Pause, Play, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { FolderOpen, Pause, Play, Plus } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
+import { useHideOnScroll } from '@/hooks/useHideOnScroll'
+import { useRevealPath } from '@/hooks/useRevealPath'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
-import { trimOpenPath } from '@/hooks/useTrimEnv'
-import { toast } from '@/lib/toast'
+import { usePlatform } from '@/platform'
 import { cn } from '@/lib/utils'
 
-// 悬浮工具条（图一：玻璃胶囊 · 常用操作：添加任务 / 全部开始暂停 / 打开目录）
-export function FloatingBar({ isMobile, onOpenAdd }: { isMobile?: boolean; onOpenAdd: () => void }) {
+interface Props {
+  isMobile?: boolean
+  onOpenAdd: () => void
+  onOpenClean: () => void
+  /** 主内容列：其中任何滚动发生都暂时收起胶囊 */
+  scrollHost?: RefObject<HTMLElement | null>
+}
+
+/**
+ * 底部悬浮胶囊（液态玻璃 · float 材质档）
+ *
+ * 只放首页拿不到的操作：添加任务、全部启停、清理已完成。
+ * 刷新 / 统计已在分类标题行常驻，重复一遍等于让玻璃多压住一块列表。
+ *
+ * 水平居中悬浮在列表之上，且刻意不占停靠边界：它只有 56px 宽，而任何预留
+ * 净空都按整条列表的宽度生效，为一颗圆钮让出全宽空带不值。让位靠
+ * useHideOnScroll——滑动期间整块玻璃下滑出屏，静止时才浮在列表上。
+ */
+export function FloatingBar({ isMobile, onOpenAdd, onOpenClean, scrollHost }: Props) {
   const { t } = useTranslation()
   const torrents = useAppStore((s) => s.torrents)
   const downloadDir = useAppStore((s) => s.session?.downloadDir)
   const actions = useTorrentActions()
+  const { can } = usePlatform()
+  const revealPath = useRevealPath()
+  const [expanded, setExpanded] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const hidden = useHideOnScroll(scrollHost)
 
-  // 有活动任务（下载/做种中）时显示暂停，否则显示开始
-  const hasActive = torrents.some((x) => x.status === 3 || x.status === 4 || x.status === 5 || x.status === 6)
+  // 有活动任务（排队/下载/做种中）时显示暂停，否则显示开始
+  const hasActive = torrents.some((x) => x.status >= 3 && x.status <= 6)
+  const hasCompleted = torrents.some((x) => x.percentDone >= 1)
+
+  // 展开态：点击胶囊外部或按 Esc 收起
+  useEffect(() => {
+    if (!expanded) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setExpanded(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExpanded(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [expanded])
+
+  // 滑走时一并收起，回来才是干净的一颗 +
+  useEffect(() => {
+    if (hidden) setExpanded(false)
+  }, [hidden])
 
   const openDir = async () => {
     if (!downloadDir) return
-    const ok = await trimOpenPath(downloadDir)
-    if (!ok) {
-      navigator.clipboard?.writeText(downloadDir).catch(() => {})
-      toast.info(t('sidebar.openDirFallback', { dir: downloadDir }))
-    }
+    await revealPath(downloadDir)
   }
 
-  const item = cn(
-    'flex items-center justify-center text-gray-600 dark:text-gray-300 active:scale-95 transition-transform',
-    isMobile ? 'h-10 w-10' : 'h-8 w-8',
-  )
+  const size = isMobile ? 'h-11' : 'h-10'
+  const items = [
+    { key: 'add', label: t('topbar.addTask'), icon: Magnet, run: onOpenAdd },
+    {
+      key: 'toggleAll',
+      label: hasActive ? t('action.pauseAll') : t('action.startAll'),
+      icon: hasActive ? Pause : Play,
+      run: () => void (hasActive ? actions.pauseAll() : actions.startAll()),
+    },
+    { key: 'openDir', label: t('action.openDownloadDir'), icon: FolderOpen, run: () => void openDir(), disabled: !downloadDir },
+    { key: 'clean', label: t('batchClean.title'), icon: Eraser, run: onOpenClean, disabled: !hasCompleted },
+  ]
+  // 「打开下载目录」需要宿主文件管理器能力，不支持时隐藏（与种子右键菜单保持一致）
+  const visibleItems = can('fs.revealPath') ? items : items.filter((i) => i.key !== 'openDir')
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 glass-panel-strong rounded-full px-2 py-1.5 shadow-[0_8px_24px_rgba(80,110,180,0.18)]">
+    <div
+      ref={rootRef}
+      role="toolbar"
+      aria-expanded={expanded}
+      aria-label={t('floatingBar.label')}
+      inert={hidden || undefined}
+      className={cn(
+        'fixed z-40 left-1/2 bottom-[calc(var(--chrome-inset-bottom)+var(--statusbar-h)+8px)]',
+        // 玻璃胶囊：float 档材质 + 完全圆角，内层按钮同为圆角构成同心关系
+        'tm-dock glass-panel-strong flex items-center rounded-full p-1.5',
+        // 居中偏移与隐藏位移各自只写 --tw-translate-x / -y，
+        // 共用同一条 translate 简写声明，因此可以合并在这一层
+        '-translate-x-1/2',
+        'transition-[transform,translate,opacity] duration-[350ms] [transition-timing-function:var(--ease-spring)]',
+        // fixed 元素不受 shell 的 overflow 裁切，位移量必须覆盖"自身高 + 到视口底的偏移"
+        hidden && 'translate-y-[calc(100%+var(--chrome-inset-bottom)+var(--statusbar-h)+16px)] opacity-0',
+      )}
+    >
+      {/* 展开手柄：+ 旋转 45° 读作 ×，同一控件承担开与合 */}
       <button
-        onClick={onOpenAdd}
-        title={t('topbar.addTask')}
-        className={cn(item, 'text-primary')}
-      >
-        <Plus className="w-5 h-5" />
-      </button>
-
-      <button
-        onClick={() => void openDir()}
+        onClick={() => setExpanded((v) => !v)}
+        aria-label={expanded ? t('floatingBar.collapse') : t('floatingBar.expand')}
         className={cn(
-          'flex items-center gap-1.5 rounded-full px-3 text-body font-medium text-gray-700 dark:text-gray-200 active:scale-95 transition-transform',
-          isMobile ? 'h-10' : 'h-8',
+          size, 'w-11 shrink-0 rounded-full tm-press flex items-center justify-center text-white',
+          'bg-[linear-gradient(135deg,var(--brand-grad-from),var(--brand-grad-to))]',
+          'shadow-[0_4px_16px_color-mix(in_srgb,var(--color-primary)_42%,transparent)]',
         )}
       >
-        <FolderOpen className="w-4 h-4 text-primary" />
-        {t('action.openDownloadDir')}
+        <Plus
+          className={cn('w-5 h-5 transition-transform duration-[350ms] [transition-timing-function:var(--ease-spring)]', expanded && 'rotate-45')}
+          strokeWidth={2.2}
+        />
       </button>
 
-      <button
-        onClick={() => (hasActive ? actions.pauseAll() : actions.startAll())}
-        title={hasActive ? t('action.stop') : t('action.start')}
-        className={item}
-      >
-        {hasActive ? <Pause className="w-4.5 h-4.5" /> : <Play className="w-4.5 h-4.5" />}
-      </button>
+      {visibleItems.map((item, i) => {
+        const Icon = item.icon
+        const collapsed = !expanded
+        return (
+          <button
+            key={item.key}
+            title={item.label}
+            aria-label={item.label}
+            tabIndex={collapsed ? -1 : 0}
+            disabled={item.disabled}
+            onClick={item.run}
+            style={{
+              // 展开时由内向外依次长出，收起时反向——避免整排"啪"地跳变
+              transitionDelay: collapsed ? `${(visibleItems.length - i) * 22}ms` : `${60 + i * 40}ms`,
+            }}
+            className={cn(
+              size,
+              'overflow-hidden rounded-full tm-press flex items-center justify-center shrink-0',
+              'transition-[width,opacity,transform,scale] duration-[350ms] [transition-timing-function:var(--ease-spring)]',
+              collapsed
+                ? 'w-0 opacity-0 scale-75 pointer-events-none'
+                : 'w-11 opacity-100 scale-100 ml-1',
+              item.disabled
+                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                : 'text-gray-600 dark:text-gray-300 hover:text-primary hover:bg-primary/10',
+            )}
+          >
+            <Icon className="w-5 h-5 shrink-0" strokeWidth={1.75} />
+          </button>
+        )
+      })}
     </div>
   )
 }

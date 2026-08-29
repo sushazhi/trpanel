@@ -12,12 +12,14 @@ import { TorrentDetail } from '@/components/TorrentDetail'
 import { TorrentList } from '@/components/TorrentList'
 import { BatchCleanDialog } from '@/components/ToolsDialogs'
 import { useFilter } from '@/hooks/useFilter'
+import { useGlassChrome } from '@/hooks/useGlassChrome'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useResponsive } from '@/hooks/useResponsive'
 import { useSwipeGesture } from '@/hooks/useSwipeGesture'
-import { useTrimEnv } from '@/hooks/useTrimEnv'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
+import type { AppState } from '@/stores/appStore'
 import type { Torrent } from '@/types'
 import { TopBar } from '@/components/TopBar'
 import { ListHeader } from '@/components/ListHeader'
@@ -26,14 +28,20 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmHost } from '@/lib/confirm'
+import { ThemeColors } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { Toaster } from 'sonner'
 import '@/i18n'
 
+// 玻璃折射强度由 CSS 消费（--glass-blur-*），系统值作为两个开关的初始状态
+const SYS_TRANSPARENCY = '(prefers-reduced-transparency: reduce)'
+const SYS_MOTION = '(prefers-reduced-motion: reduce)'
+const SYS_CONTRAST = '(prefers-contrast: more)'
+
 export default function App() {
   const { t, i18n } = useTranslation()
   const { isMobile } = useResponsive()
-  const { isTrimOS, config } = useTrimEnv()
+  const { env } = usePlatform()
   useWebSocket()
 
   const torrents = useAppStore((s) => s.torrents)
@@ -51,6 +59,11 @@ export default function App() {
   const fontSize = useAppStore((s) => s.fontSize)
   const sortField = useAppStore((s) => s.sortField)
   const sortOrder = useAppStore((s) => s.sortOrder)
+  const sidebarWidth = useAppStore((s) => s.sidebarWidth)
+  const reduceGlass = useAppStore((s) => s.reduceGlass)
+  const reduceMotion = useAppStore((s) => s.reduceMotion)
+  const moreContrast = useAppStore((s) => s.moreContrast)
+  const a11yTouched = useAppStore((s) => s.a11yTouched)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -65,6 +78,19 @@ export default function App() {
   const [addInitial, setAddInitial] = useState<{ files: File[]; text: string } | null>(null)
   // 供快捷键回调读取最新过滤结果（避免 hooks 顺序依赖）
   const filteredRef = useRef<Torrent[]>([])
+
+  // 停靠玻璃的几何/材质联动：顶栏与底栏实测位置决定滚动层避让与渐隐
+  const shellRef = useRef<HTMLDivElement>(null)
+  const topDockRef = useRef<HTMLDivElement>(null)
+  const statusDockRef = useRef<HTMLDivElement>(null)
+  // 边界只留给状态栏。居中悬浮胶囊不占边界：它只有 56px 宽，但任何预留净空
+  // 都是按整条列表的宽度算的，等于为一颗圆钮让出一条全宽空带。
+  // 它不遮挡列表靠的是自身"滑动即隐藏"（见 useHideOnScroll），不是靠让位。
+  useGlassChrome({
+    shell: shellRef,
+    top: topDockRef,
+    bottoms: [statusDockRef],
+  })
 
   useKeyboardShortcuts({
     onAdd: () => setAddOpen(true),
@@ -123,18 +149,46 @@ export default function App() {
     document.documentElement.style.fontSize = `${fontSize}px`
   }, [fontSize])
 
+  // 未手动干预前跟随系统偏好；用户在「界面设置」里拨过任一开关后即由用户接管
   useEffect(() => {
-    if (isTrimOS && config?.theme) {
-      setTheme(config.theme === 'dark' ? 'dark' : 'light')
+    if (a11yTouched) return
+    const queries = [
+      { mql: window.matchMedia(SYS_TRANSPARENCY), key: 'reduceGlass' },
+      { mql: window.matchMedia(SYS_MOTION), key: 'reduceMotion' },
+      { mql: window.matchMedia(SYS_CONTRAST), key: 'moreContrast' },
+    ] as const
+    const sync = () => {
+      const next = Object.fromEntries(queries.map(({ mql, key }) => [key, mql.matches]))
+      const cur = useAppStore.getState()
+      if (next.reduceGlass !== cur.reduceGlass || next.reduceMotion !== cur.reduceMotion || next.moreContrast !== cur.moreContrast) {
+        useAppStore.setState(next as Pick<AppState, 'reduceGlass' | 'reduceMotion' | 'moreContrast'>)
+      }
     }
-  }, [isTrimOS, config?.theme, setTheme])
+    sync()
+    queries.forEach(({ mql }) => mql.addEventListener('change', sync))
+    return () => queries.forEach(({ mql }) => mql.removeEventListener('change', sync))
+  }, [a11yTouched])
 
   useEffect(() => {
-    if (isTrimOS && config?.language) {
-      const lang = String(config.language)
+    const root = document.documentElement
+    root.dataset.a11yGlass = reduceGlass ? 'reduce' : 'full'
+    root.dataset.a11yMotion = reduceMotion ? 'reduce' : 'full'
+    root.dataset.a11yContrast = moreContrast ? 'more' : 'normal'
+  }, [reduceGlass, reduceMotion, moreContrast])
+
+  // 跟随宿主环境（如 fnOS 的系统主题/语言）；通用平台拿不到 env，保持用户自设
+  useEffect(() => {
+    if (env.theme) {
+      setTheme(env.theme === 'dark' ? 'dark' : 'light')
+    }
+  }, [env.theme, setTheme])
+
+  useEffect(() => {
+    if (env.language) {
+      const lang = String(env.language)
       setLanguage(lang.startsWith('zh') ? 'zh' : 'en')
     }
-  }, [isTrimOS, config?.language, setLanguage])
+  }, [env.language, setLanguage])
 
   useEffect(() => {
     torrentApi.sites().then(setTorrentSites).catch(() => {})
@@ -232,59 +286,67 @@ export default function App() {
     }
   }, [])
 
-  const layout = (
-    <div className="flex flex-col h-full tm-app-bg text-gray-800 dark:text-gray-100 p-3 gap-3">
-      {/* 玻璃悬浮顶栏（桌面/移动共用，移动端左侧为抽屉按钮） */}
-      <TopBar
-        isMobile={isMobile}
-        onOpenDrawer={() => setDrawerOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenAdd={() => setAddOpen(true)}
-        onOpenDashboard={() => setDashboardOpen(true)}
-        onOpenLabels={() => {
-          const first = torrents.find((t) => selectedIds.includes(t.id))
-          setBatchLabels(first?.labels ?? [])
-          setLabelModalOpen(true)
-        }}
-      />
-
-      <div className="flex flex-1 min-h-0 gap-3">
-        {!isMobile && <DesktopSidebar />}
-
-        <main className="flex-1 flex flex-col min-w-0 gap-3" ref={dropRef}>
-        {/* 分类标题行仅移动端保留（桌面端排序/视图/刷新已并入顶栏，批量操作并入 TopBar） */}
-        {isMobile && <ListHeader count={filtered.length} isMobile onOpenDashboard={() => setDashboardOpen(true)} />}
-
-        <div className="flex-1 min-h-0 overflow-hidden relative">
-          {dragOver && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/20 border-2 border-dashed border-primary rounded-lg pointer-events-none">
-              <div className="text-center">
-                <Plus className="w-16 h-16 text-primary mb-4" />
-                <p className="text-title1 font-semibold text-primary">{t('common.dragToAdd')}</p>
-                {dragFiles.current.length > 0 && (
-                  <p className="text-body mt-2 text-primary/80">{dragFiles.current.join(', ')}</p>
-                )}
-                {dragText.current && dragText.current.startsWith('magnet:') && (
-                  <p className="text-body mt-1 text-primary/80 max-w-md truncate px-4">{dragText.current}</p>
-                )}
-              </div>
-            </div>
-          )}
-          <TorrentList torrents={filtered} isMobile={isMobile} onOpenDetail={setDetailTorrent} onOpenBatchClean={() => setCleanOpen(true)} />
-        </div>
-
-        <StatusBar isMobile={isMobile} />
-
-        {/* 悬浮工具条（图一：添加任务 / 全部开始暂停 / 打开目录） */}
-        {isMobile && <FloatingBar isMobile onOpenAdd={() => setAddOpen(true)} />}
-        </main>
-      </div>
-    </div>
-  )
+  // 主内容列在侧栏右侧全出血铺开；移动端铺满整宽
+  const contentLeft = isMobile
+    ? 'calc(var(--shell-gap) + var(--safe-left))'
+    : `calc(var(--shell-gap) * 2 + var(--safe-left) + ${sidebarWidth}px)`
 
   return (
-    <div className="h-full" style={{ height: '100vh' }}>
-      {layout}
+    <div ref={shellRef} className="tm-shell h-full w-full text-gray-800 dark:text-gray-100" style={{ height: '100dvh' }}>
+      {/* 内容层：全出血，列表从屏幕顶端开始滚动，才会真正穿过停靠玻璃 */}
+      <div className="tm-content" style={{ left: contentLeft }} ref={dropRef}>
+        {dragOver && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/20 border-2 border-dashed border-primary rounded-panel pointer-events-none backdrop-blur-sm">
+            <div className="text-center">
+              <Plus className="w-16 h-16 text-primary mb-4" />
+              <p className="text-title1 font-semibold text-primary">{t('common.dragToAdd')}</p>
+              {dragFiles.current.length > 0 && (
+                <p className="text-body mt-2 text-primary/80">{dragFiles.current.join(', ')}</p>
+              )}
+              {dragText.current && dragText.current.startsWith('magnet:') && (
+                <p className="text-body mt-1 text-primary/80 max-w-md truncate px-4">{dragText.current}</p>
+              )}
+            </div>
+          </div>
+        )}
+        <TorrentList torrents={filtered} isMobile={isMobile} onOpenDetail={setDetailTorrent} onOpenBatchClean={() => setCleanOpen(true)} />
+      </div>
+
+      {/* 侧栏：顶边与顶栏齐平，其内容同样穿过玻璃 */}
+      {!isMobile && <DesktopSidebar />}
+
+      {/* 顶部停靠栏 */}
+      <div ref={topDockRef} className="tm-dock-top flex flex-col gap-3">
+        <TopBar
+          isMobile={isMobile}
+          onOpenDrawer={() => setDrawerOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenAdd={() => setAddOpen(true)}
+          onOpenDashboard={() => setDashboardOpen(true)}
+          onOpenLabels={() => {
+            const first = torrents.find((t) => selectedIds.includes(t.id))
+            setBatchLabels(first?.labels ?? [])
+            setLabelModalOpen(true)
+          }}
+        />
+        {/* 分类标题行仅移动端保留（桌面端排序/视图/刷新已并入顶栏） */}
+        {isMobile && <ListHeader count={filtered.length} isMobile onOpenDashboard={() => setDashboardOpen(true)} />}
+      </div>
+
+      {/* 底部停靠栏 */}
+      <div ref={statusDockRef} className="tm-dock-bottom">
+        <StatusBar isMobile={isMobile} />
+      </div>
+
+      {/* 悬浮工具胶囊（移动端）：收起为一个 +，展开为高频操作 */}
+      {isMobile && (
+        <FloatingBar
+          isMobile
+          onOpenAdd={() => setAddOpen(true)}
+          onOpenClean={() => setCleanOpen(true)}
+          scrollHost={dropRef}
+        />
+      )}
 
       {isMobile && (
         <MobileDrawer
@@ -308,15 +370,22 @@ export default function App() {
       />
       <Dashboard open={dashboardOpen} onClose={() => setDashboardOpen(false)} />
       <BatchCleanDialog open={cleanOpen} onClose={() => setCleanOpen(false)} />
-      <TorrentDetail torrent={detailTorrent} onClose={() => setDetailTorrent(null)} onOpenChange={(open) => { if (!open) setDetailTorrent(null) }} />
+      <TorrentDetail torrent={detailTorrent} onClose={() => setDetailTorrent(null)} onOpenChange={(open) => { if (!open) setDetailTorrent(null) }} isMobile={isMobile} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <PwaUpdatePrompt />
       <ConfirmHost />
-      <Toaster richColors position="top-center" toastOptions={{ style: { borderRadius: '12px' } }} />
+      {/* 系统 chrome 颜色跟随品牌预设，否则 PWA 下顶栏色带断层会破坏玻璃延伸感 */}
+      <ThemeColors />
+      <Toaster
+        position="top-center"
+        offset={{ top: 'calc(var(--pad-top) + 8px)' }}
+        mobileOffset={{ top: 'calc(var(--pad-top) + 8px)' }}
+        toastOptions={{ classNames: { toast: 'tm-toast' } }}
+      />
 
       {/* 批量打标签（覆盖 / 添加 / 移除 三种模式） */}
       <Dialog open={labelModalOpen} onOpenChange={setLabelModalOpen}>
-        <DialogContent className="glass-panel-strong sm:max-w-md">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{`${t('action.editLabels')} (${selectedIds.length})`}</DialogTitle>
           </DialogHeader>
@@ -347,7 +416,7 @@ export default function App() {
             <SelectTrigger className="w-full">
               <SelectValue placeholder={t('action.editLabels')} />
             </SelectTrigger>
-            <SelectContent className="glass-panel-strong">
+            <SelectContent>
               {allLabels.map((l) => (
                 <SelectItem key={l} value={l}>{l}</SelectItem>
               ))}

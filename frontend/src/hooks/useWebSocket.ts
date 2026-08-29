@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '@/stores/appStore'
 import { torrentApi } from '@/api/torrent'
+import { APP_BASE } from '@/platform/appBase'
 import type { WsMessage } from '@/types'
 
 export type WsStatus = 'connecting' | 'connected' | 'disconnected'
 
 // REST 兜底拉取间隔（仅当 WebSocket 不可用时启用）
 const FALLBACK_POLL_MS = 5000
-// WebSocket 连续失败上限，达到后放弃重连，仅用 REST 轮询（内嵌 WebView 等环境 ws 不可用）
+// 初次连接阶段的连续失败上限，达到后放弃重连，仅用 REST 轮询（内嵌 WebView 等环境 ws 不可用）
 const MAX_WS_RETRIES = 5
+// 已成功连接过说明环境支持 ws，此时放宽上限：后端开发态热重启（air）会频繁断开 ws，
+// 不应因重启期间的重试计数而永久退化到轮询
+const MAX_WS_RETRIES_AFTER_SUCCESS = 30
 
 // WebSocket 连接管理（自动重连，指数退避）
 // 兜底策略：某些环境（如内嵌 WebView）会阻断 WebSocket，此时退化用 REST API 轮询，保证数据可显示
@@ -21,6 +25,9 @@ export function useWebSocket() {
     let pollTimer: number | null = null
     let retries = 0
     let closed = false
+    let everConnected = false
+    // 首次成功连接前用较小上限（快速判定环境是否支持 ws），之后放宽以便后端重启后自动恢复
+    const retryLimit = () => (everConnected ? MAX_WS_RETRIES_AFTER_SUCCESS : MAX_WS_RETRIES)
 
     const store = useAppStore.getState()
 
@@ -52,7 +59,7 @@ export function useWebSocket() {
         window.clearTimeout(retryTimer)
         retryTimer = null
       }
-      if (retries >= MAX_WS_RETRIES) {
+      if (retries >= retryLimit()) {
         // ws 在此环境不可用，停止重连，仅用 REST 轮询
         setStatus('disconnected')
         store.setWsStatus('disconnected')
@@ -62,7 +69,8 @@ export function useWebSocket() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       let socket: WebSocket
       try {
-        socket = new WebSocket(`${proto}://${location.host}/ws`)
+        // APP_BASE：网关部署时的基础路径（见 platform/appBase），直连部署为空串
+        socket = new WebSocket(`${proto}://${location.host}${APP_BASE}/ws`)
       } catch {
         startPolling()
         return
@@ -74,6 +82,7 @@ export function useWebSocket() {
         setStatus('connected')
         store.setWsStatus('connected')
         retries = 0
+        everConnected = true
         stopPolling() // ws 可用，停止 REST 轮询
         void fetchFallback() // 拉一次最新数据，覆盖连接期间的变更
       }
@@ -92,7 +101,7 @@ export function useWebSocket() {
         setStatus('disconnected')
         store.setWsStatus('disconnected')
         startPolling() // ws 断开，REST 轮询兜底
-        retries = Math.min(retries + 1, MAX_WS_RETRIES)
+        retries = Math.min(retries + 1, retryLimit())
         retryTimer = window.setTimeout(connect, Math.min(1000 * retries, 30000))
       }
       // 不在 onerror 中手动 close（避免在连接未打开时抛 "WebSocket closed without opened"），
@@ -107,7 +116,7 @@ export function useWebSocket() {
         return
       }
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
-      if (retries >= MAX_WS_RETRIES) startPolling()
+      if (retries >= retryLimit()) startPolling()
       else connect()
     }
 

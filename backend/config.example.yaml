@@ -4,6 +4,17 @@ tr_user: "admin"
 tr_pass: "password"
 
 # 服务配置
-server_port: 8080
+server_port: 8200
 poll_interval: "2s"
 log_level: "info"
+
+# 宿主平台：generic（默认，Docker / 物理机 / 任意 Linux 直连）| fnos（飞牛应用）
+# 留空时自动推断：配置了 gateway_prefix 或检测到宿主注入的 TRIM_APPDEST 即判定为 fnos
+platform: "generic"
+
+# 宿主网关挂载的 URL 前缀（如飞牛统一网关的 /app/transmission）；直连部署留空
+gateway_prefix: ""
+
+# 「按路径添加种子」允许读取的根目录（逗号分隔）
+# 宿主文件选择器返回的路径必须落在这些目录下；清空则关闭按路径添加
+torrent_path_roots: "/vol,/mnt,/media,/volume1"

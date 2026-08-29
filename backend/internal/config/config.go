@@ -12,13 +12,18 @@ import (
 
 // Config 服务配置
 type Config struct {
-	TransmissionURL string        // Transmission RPC 端点
-	User            string        // RPC 用户名
-	Password        string        // RPC 密码
-	Port            string        // 本服务监听端口
-	PollInterval    time.Duration // WebSocket 轮询间隔
-	LogLevel        string        // 日志级别 debug/info/warn/error
-	DataDir         string        // 数据目录（状态文件存放位置）
+	TransmissionURL  string        // Transmission RPC 端点
+	User             string        // RPC 用户名
+	Password         string        // RPC 密码
+	Host             string        // 本服务监听地址（默认仅回环，避免局域网裸奔）
+	Port             string        // 本服务监听端口
+	APIToken         string        // 接口访问令牌；为空表示不启用鉴权
+	Platform         string        // 宿主平台：generic（默认）| fnos，留空时自动推断
+	GatewayPrefix    string        // 宿主网关挂载的 URL 前缀（如 /app/transmission）
+	TorrentPathRoots []string      // 允许按路径读取 .torrent 的根目录（NAS 文件选择器）
+	PollInterval     time.Duration // WebSocket 轮询间隔
+	LogLevel         string        // 日志级别 debug/info/warn/error
+	DataDir          string        // 数据目录（状态文件存放位置）
 }
 
 // Load 加载配置，优先级：环境变量 > .env.local > .env > config.yaml > 默认值
@@ -33,7 +38,14 @@ func Load() (*Config, error) {
 	v.SetDefault("tr_url", "http://localhost:9091/transmission/rpc")
 	v.SetDefault("tr_user", "")
 	v.SetDefault("tr_pass", "")
-	v.SetDefault("server_port", 8080)
+	v.SetDefault("server_host", "127.0.0.1")
+	v.SetDefault("server_port", 8200)
+	v.SetDefault("api_token", "")
+	// platform 留空时由 platform.Detect 按 GATEWAY_PREFIX / 宿主环境变量推断
+	v.SetDefault("platform", "")
+	v.SetDefault("gateway_prefix", "")
+	// NAS 文件选择器返回的路径仅允许落在这些根目录下（逗号分隔，可用 TORRENT_PATH_ROOTS 覆盖）
+	v.SetDefault("torrent_path_roots", []string{"/vol", "/mnt", "/media", "/volume1"})
 	v.SetDefault("poll_interval", "2s")
 	v.SetDefault("log_level", "info")
 	v.SetDefault("data_dir", defaultDataDir())
@@ -70,13 +82,17 @@ func Load() (*Config, error) {
 
 	// 环境变量覆盖（最高优先级）
 	envKeys := map[string]string{
-		"tr_url":        "TR_URL",
-		"tr_user":       "TR_USER",
-		"tr_pass":       "TR_PASS",
-		"server_port":   "SERVER_PORT",
-		"poll_interval": "POLL_INTERVAL",
-		"log_level":     "LOG_LEVEL",
-		"data_dir":      "TM_DATA_DIR",
+		"tr_url":         "TR_URL",
+		"tr_user":        "TR_USER",
+		"tr_pass":        "TR_PASS",
+		"server_host":    "SERVER_HOST",
+		"server_port":    "SERVER_PORT",
+		"api_token":      "API_TOKEN",
+		"platform":       "TM_PLATFORM",
+		"gateway_prefix": "GATEWAY_PREFIX",
+		"poll_interval":  "POLL_INTERVAL",
+		"log_level":      "LOG_LEVEL",
+		"data_dir":       "TM_DATA_DIR",
 	}
 	for key, env := range envKeys {
 		if val, ok := os.LookupEnv(env); ok {
@@ -89,15 +105,36 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("poll_interval 格式无效: %w", err)
 	}
 
+	roots := expandList(v.GetStringSlice("torrent_path_roots"))
+	if raw, ok := os.LookupEnv("TORRENT_PATH_ROOTS"); ok {
+		roots = expandList(strings.Split(raw, ","))
+	}
+
 	return &Config{
-		TransmissionURL: v.GetString("tr_url"),
-		User:            v.GetString("tr_user"),
-		Password:        v.GetString("tr_pass"),
-		Port:            fmt.Sprintf("%d", v.GetInt("server_port")),
-		PollInterval:    dur,
-		LogLevel:        v.GetString("log_level"),
-		DataDir:         dataDir,
+		TransmissionURL:  v.GetString("tr_url"),
+		User:             v.GetString("tr_user"),
+		Password:         v.GetString("tr_pass"),
+		Host:             v.GetString("server_host"),
+		Port:             fmt.Sprintf("%d", v.GetInt("server_port")),
+		APIToken:         v.GetString("api_token"),
+		Platform:         strings.TrimSpace(v.GetString("platform")),
+		GatewayPrefix:    strings.TrimSpace(v.GetString("gateway_prefix")),
+		TorrentPathRoots: roots,
+		PollInterval:     dur,
+		LogLevel:         v.GetString("log_level"),
+		DataDir:          dataDir,
 	}, nil
+}
+
+// expandList 清理并展开路径列表中的 ~ 与环境变量，丢弃空项
+func expandList(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if p := strings.TrimSpace(item); p != "" {
+			out = append(out, expandPath(p))
+		}
+	}
+	return out
 }
 
 // defaultDataDir 默认数据目录为 ~/.transmission-manager（与 config.yaml 搜索路径一致），

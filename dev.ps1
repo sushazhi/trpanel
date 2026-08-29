@@ -1,8 +1,8 @@
-<#
+﻿<#
 .SYNOPSIS
   本地开发一键启动（前端 Vite Dev Server + 后端 Go 服务）
 .DESCRIPTION
-  同时拉起前后端：前端 http://localhost:5173，后端 http://localhost:8080。
+  同时拉起前后端：前端 http://localhost:5173，后端 http://localhost:8200。
   所有开发运行时产物（后端状态文件 tm-state.json、前后端日志）统一写入
   项目根 dev/ 目录，避免污染代码目录。
 #>
@@ -16,7 +16,8 @@ $Root    = $PSScriptRoot
 $DevDir  = Join-Path $Root "dev"
 $DataDir = Join-Path $DevDir "data"
 $LogDir  = Join-Path $DevDir "logs"
-$null    = New-Item -ItemType Directory -Force -Path $DataDir, $LogDir
+$AirDir  = Join-Path $DevDir "air"   # air 热重载的构建输出目录
+$null    = New-Item -ItemType Directory -Force -Path $DataDir, $LogDir, $AirDir
 
 $BackendLog  = Join-Path $LogDir "backend.log"
 $FrontendLog = Join-Path $LogDir "frontend.log"
@@ -29,10 +30,20 @@ Write-Host "[dev]   前端日志     -> $FrontendLog"     -ForegroundColor DarkG
 # 后端运行时数据（tm-state.json / .env.local 等）写入 dev/data，而非代码目录
 $env:TM_DATA_DIR = $DataDir
 
+# 后端：装了 air 则启用热重载（.go 变更自动重编译重启），否则回退 go run
+$backendCmd = if (Get-Command air -ErrorAction SilentlyContinue) {
+    Write-Host "[dev] 后端热重载：air（.go 变更自动重编译重启）"    -ForegroundColor DarkGray
+    "air > `"$BackendLog`" 2>&1"
+} else {
+    Write-Host "[dev] 未检测到 air，后端改动需手动重启"             -ForegroundColor Yellow
+    Write-Host "[dev]   安装：go install github.com/air-verse/air@latest" -ForegroundColor Yellow
+    "go run ./cmd/server > `"$BackendLog`" 2>&1"
+}
+
 # 说明：Start-Process 不允许 stdout/stderr 重定向到同一文件，故经 cmd /c 合并重定向
 $backend = Start-Process -WindowStyle Hidden -FilePath "cmd.exe" `
     -WorkingDirectory (Join-Path $Root "backend") `
-    -ArgumentList "/c", "go run ./cmd/server > `"$BackendLog`" 2>&1" `
+    -ArgumentList "/c", $backendCmd `
     -PassThru
 
 $frontend = Start-Process -WindowStyle Hidden -FilePath "cmd.exe" `
@@ -41,7 +52,7 @@ $frontend = Start-Process -WindowStyle Hidden -FilePath "cmd.exe" `
     -PassThru
 
 Write-Host "[dev] 已启动  后端 PID=$($backend.Id)  前端 PID=$($frontend.Id)" -ForegroundColor Green
-Write-Host "[dev] 前端 http://localhost:5173   后端 http://localhost:8080"    -ForegroundColor Green
+Write-Host "[dev] 前端 http://localhost:5173   后端 http://localhost:8200"    -ForegroundColor Green
 if ($bg) {
     Write-Host "[dev] 后台模式已启动，日志见 dev/logs/" -ForegroundColor Green
     exit

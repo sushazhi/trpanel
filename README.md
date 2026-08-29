@@ -11,17 +11,22 @@
 ```
 transmission/
 ├── backend/     # Go 后端（单二进制）
-│   ├── cmd/server/              # 入口
+│   ├── cmd/server/              # 入口（解析平台 + 组装服务）
 │   ├── internal/
-│   │   ├── api/                 # REST API + WebSocket Hub
+│   │   ├── api/                 # REST API + WebSocket Hub（宿主无关）
 │   │   ├── config/              # 配置加载（环境变量/.env/config.yaml）
-│   │   ├── middleware/          # CORS、日志
+│   │   ├── middleware/          # CORS、安全头、鉴权（策略由平台提供）
 │   │   ├── models/              # 数据结构
+│   │   ├── platform/            # 宿主平台抽象
+│   │   │   ├── generic.go       # 通用部署（默认，最小权限）
+│   │   │   └── fnos/            # 飞牛 fnOS（网关集成 + fpk 更新）
 │   │   └── rpc/                 # Transmission RPC 封装 + 热更新管理
 │   ├── web/dist/                # 内嵌前端构建产物
 │   └── transmission-manager.exe # 已编译产物
 └── frontend/   # React + TypeScript 前端
-    └── src/                     # 组件/状态/国际化/飞牛集成
+    └── src/
+        ├── platform/            # 宿主能力抽象（web / fnos）
+        └── ...                  # 组件 / 状态 / 国际化
 ```
 
 ## 如何使用
@@ -54,7 +59,7 @@ transmission-manager.exe      # Windows
 ```
 
 ### 4. 访问
-浏览器打开 `http://<服务器IP>:8080`。连接成功后即可添加 / 管理种子，详见下方「使用指南」。
+浏览器打开 `http://<服务器IP>:8200`。连接成功后即可添加 / 管理种子，详见下方「使用指南」。
 
 ### （可选）从源码构建前端并嵌入
 如需自行修改前端界面：
@@ -79,7 +84,20 @@ go build -o transmission-manager ./cmd/server
 启动后：
 
 - 前端：http://localhost:5173（Vite Dev Server，已代理 `/api`、`/ws` 到后端）
-- 后端：http://localhost:8080
+- 后端：http://localhost:8200
+
+**热更新（默认开启，改完即见，无需手动刷新）**
+
+- 前端：Vite HMR + React Fast Refresh，保存 `.tsx` / `.ts` / CSS 后浏览器自动局部更新并尽量保留组件状态。
+- 后端：脚本检测到 `air` 时自动启用 Go 热重载，保存 `.go` 后自动重编译重启（前端 WebSocket 会自动重连）。
+  安装一次即可：`go install github.com/air-verse/air@latest`（未安装时回退为 `go run`，改动需手动重启）。
+
+特殊环境开关（环境变量）：
+
+| 变量 | 作用 |
+| --- | --- |
+| `DEV_NO_HMR=1` | 关闭前端 HMR（内嵌 WebView 等环境会阻断 WebSocket） |
+| `DEV_WATCH_POLL=1` | 文件监听改用轮询（网络盘 / 虚拟机共享目录 / WSL 挂载目录监听不到事件时） |
 
 **所有开发运行时产物统一写入项目根 `dev/` 目录**，不再散落在代码目录：
 
@@ -97,7 +115,7 @@ dev/
 部署启动后，按以下流程即可开始管理 Transmission 下载任务。
 
 ### 首次连接
-1. 浏览器访问 `http://<服务器IP>:8080`（本机为 `http://localhost:8080`）。
+1. 浏览器访问 `http://<服务器IP>:8200`（本机为 `http://localhost:8200`）。
 2. 若 Transmission 不在本机或开启了认证，打开「设置」（桌面端：顶栏右侧头像菜单；移动端：侧滑抽屉底部），填写 RPC 地址、用户名、密码并保存；也可通过环境变量或 `config.yaml` 预先配置（详见下方「环境变量」与 `backend/config.example.yaml`）。保存后自动热更新，无需重启。
 3. 连接成功后，主界面实时显示速度、进度与种子列表。
 
@@ -122,8 +140,24 @@ dev/
 ### 主题与语言
 右上角切换明 / 暗主题与中文 / 英文（偏好持久化）；在飞牛 OS 中自动跟随系统主题。
 
-### 飞牛 OS（fnOS）集成
-部署到 fnOS 后自动探测并启用原生能力：文件选择器选择下载目录、语义路径映射、系统主题同步。
+### 宿主平台（fnOS / 通用部署）
+
+核心功能不绑定任何特定系统，飞牛相关特性全部收敛在「宿主平台」一层：
+
+- 后端 `internal/platform/`：平台提供安全策略（是否允许 iframe 嵌入、是否信任转发头）、
+  本地文件读取白名单，以及自身专属路由（如 fnOS 的应用更新接口）。
+- 前端 `src/platform/`：平台声明自己具备哪些**能力**（文件选择器、打开目录、应用更新……），
+  UI 只按能力显示入口，不支持时自动隐藏或降级为复制路径。
+
+因此同一套代码可直接跑在 Docker / 物理机 / 任意 Linux：默认 `platform=generic`，
+飞牛专属入口自动消失，其余功能完全可用。
+
+部署到 fnOS 时（`platform=fnos`，或检测到宿主注入的环境变量自动切换）额外启用：
+文件选择器选择下载目录、在系统文件管理器中定位目录、系统主题/语言同步，
+以及「设置 → 关于」中的应用更新（下载 GitHub Release 的 fpk 包后到应用中心安装）。
+
+新增一套宿主只需：后端实现 `platform.Platform` 接口并在 `init` 中 `Register`，
+前端实现 `HostPlatform` 接口并声明能力——业务代码一行都不用改。
 
 ### 进阶
 - **PWA 安装**：手机浏览器或桌面 Chrome/Edge 中选择「添加到主屏幕 / 安装应用」，可全屏使用并离线缓存，有新版本时会提示刷新。
@@ -138,9 +172,15 @@ dev/
 | `TR_URL` | `http://localhost:9091/transmission/rpc` | Transmission RPC 端点 |
 | `TR_USER` | 空 | RPC 用户名 |
 | `TR_PASS` | 空 | RPC 密码 |
-| `SERVER_PORT` | `8080` | 本服务端口 |
+| `SERVER_PORT` | `8200` | 本服务端口 |
 | `POLL_INTERVAL` | `2s` | WebSocket 轮询间隔 |
 | `LOG_LEVEL` | `info` | 日志级别 |
+| `SERVER_HOST` | `127.0.0.1` | 监听地址（非回环地址需配置 `API_TOKEN`） |
+| `API_TOKEN` | 空 | 接口访问令牌，为空表示不启用鉴权 |
+| `TM_PLATFORM` | 自动推断 | 宿主平台：`generic`（默认）/ `fnos` |
+| `GATEWAY_PREFIX` | 空 | 宿主网关挂载的 URL 前缀（如 `/app/transmission`） |
+| `TORRENT_PATH_ROOTS` | `/vol,/mnt,/media,/volume1` | 「按路径添加种子」允许读取的根目录（逗号分隔） |
+| `SERVER_SOCKET` | 空 | Unix socket 监听路径（宿主网关接入用） |
 
 配置优先级：**环境变量 > .env.local > .env > config.yaml > 默认值**。
 在界面「设置」中保存连接会写入 `.env.local` 并热更新，无需重启。

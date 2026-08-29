@@ -1,10 +1,11 @@
 import axios from 'axios'
 import type { ApiResponse } from '@/types'
+import { APP_BASE } from '@/platform/appBase'
 import { getMessage } from '@/utils/messageHolder'
 import { translateApiError } from '@/utils/errors'
 
 export const client = axios.create({
-  baseURL: '/api',
+  baseURL: APP_BASE + '/api',
   timeout: 30000,
 })
 

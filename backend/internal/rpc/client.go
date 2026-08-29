@@ -78,8 +78,19 @@ var listTorrentFields = []string{
 // GetTorrents 获取种子列表（仅列表展示字段，不含详情字段）。
 // 结果带 TTL 缓存，供 WebSocket 轮询与 REST 兜底共享，减少对 Transmission 的重复全量请求。
 func (c *Client) GetTorrents(ctx context.Context) ([]*Torrent, error) {
+	return c.getTorrents(ctx, false)
+}
+
+// GetTorrentsFresh 忽略 TTL 缓存强制拉取。
+// 写操作（添加/删除/改属性）之后的刷新必须走这里，否则会把变更前缓存的旧列表
+// 当作最新结果广播出去，界面最长 6 秒都看不到刚才的变更。
+func (c *Client) GetTorrentsFresh(ctx context.Context) ([]*Torrent, error) {
+	return c.getTorrents(ctx, true)
+}
+
+func (c *Client) getTorrents(ctx context.Context, force bool) ([]*Torrent, error) {
 	c.listMu.Lock()
-	if c.listCache != nil && time.Since(c.listCached) < listCacheTTL {
+	if !force && c.listCache != nil && time.Since(c.listCached) < listCacheTTL {
 		out := c.listCache
 		c.listMu.Unlock()
 		return out, nil

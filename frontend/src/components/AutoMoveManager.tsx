@@ -100,7 +100,7 @@ export function AutoMoveManager({ open, onClose }: { open: boolean; onClose: () 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-[640px] h-[80vh] flex flex-col p-0">
+      <DialogContent className="sm:max-w-[640px] h-[80vh] flex flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
           <DialogTitle>{t('autoMove.title')}</DialogTitle>
         </DialogHeader>
@@ -117,11 +117,11 @@ export function AutoMoveManager({ open, onClose }: { open: boolean; onClose: () 
                     void autoMoveApi.save({ ...rule, enabled: v }).then(load).catch(() => {})
                   }} />
                   <span className="font-medium text-body flex-1 truncate">{rule.name || t('autoMove.untitled')}</span>
-                  <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => setEditing({ ...rule })}>{t('common.edit')}</Button>
+                  <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => setEditing({ ...rule })}>{t('common.edit')}</Button>
                   <Button
                     size="sm"
                     variant="destructive"
-                    className="h-7 text-footnote"
+                    className="h-8 text-footnote"
                     onClick={() => {
                       void confirm({ title: t('common.confirm'), danger: true }).then((ok) => {
                         if (ok) void remove(rule.id)
@@ -159,8 +159,8 @@ export function AutoMoveManager({ open, onClose }: { open: boolean; onClose: () 
                 <Switch checked={editing.enabled} onCheckedChange={(v) => setEditing({ ...editing, enabled: v })} />
               </div>
               <div className="flex justify-end gap-2 pt-1">
-                <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => setEditing(null)}>{t('common.cancel')}</Button>
-                <Button size="sm" className="h-7 text-footnote" disabled={loading} onClick={save}>{loading ? t('common.loading') : t('common.save')}</Button>
+                <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => setEditing(null)}>{t('common.cancel')}</Button>
+                <Button size="sm" className="h-8 text-footnote" disabled={loading} onClick={save}>{loading ? t('common.loading') : t('common.save')}</Button>
               </div>
             </div>
           )}

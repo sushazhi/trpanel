@@ -41,7 +41,7 @@ export const defaultFilters: FilterOptions = {
   sortOrder: 'asc',
 }
 
-interface AppState {
+export interface AppState {
   torrents: Torrent[]
   selectedIds: number[]
   // Shift 连选的锚点（最后点击的种子 id，不持久化）
@@ -55,11 +55,12 @@ interface AppState {
   sidebarWidth: number
   columns: ColumnConfig[]
   session: Session | null
-  isTrimOS: boolean
   wsStatus: 'connecting' | 'connected' | 'disconnected'
   torrentSites: Record<number, string[]>
   fontSize: number
   singleLine: boolean
+  // 种子行首的选择框是否显示（关闭后列表更紧凑，仍可用 Ctrl/Shift 点选）
+  showCheckboxes: boolean
   // 侧边栏分组显隐（右键菜单控制）
   sidebarMenuVisible: { status: boolean; labels: boolean; dirs: boolean; sites: boolean; error: boolean }
   // 状态过滤器子菜单：状态项是否在侧边栏显示（缺省视为显示）
@@ -73,6 +74,12 @@ interface AppState {
   // 侧边栏折叠状态
   sidebarCollapsed: { labels: boolean; dirs: boolean; sites: boolean; error: boolean }
 
+  // 液态玻璃无障碍降级：默认镜像系统 prefers-*，a11yTouched 后由用户接管
+  reduceGlass: boolean
+  reduceMotion: boolean
+  moreContrast: boolean
+  a11yTouched: boolean
+
   setSortField: (field: string) => void
   setSortOrder: (order: 'asc' | 'desc') => void
   setFontSize: (n: number) => void
@@ -80,6 +87,7 @@ interface AppState {
   setShowStats: (v: boolean) => void
   setViewMode: (m: 'table' | 'grid') => void
   setSingleLine: (v: boolean) => void
+  setShowCheckboxes: (v: boolean) => void
   setTorrentSites: (s: Record<number, string[]>) => void
   setWsStatus: (s: AppState['wsStatus']) => void
   setTorrents: (list: Torrent[]) => void
@@ -99,11 +107,13 @@ interface AppState {
   setColumns: (cols: ColumnConfig[]) => void
   resetColumns: () => void
   setSession: (s: Session | null) => void
-  setIsTrimOS: (v: boolean) => void
   setSidebarCollapsed: (patch: Partial<AppState['sidebarCollapsed']>) => void
   setSidebarMenuVisible: (patch: Partial<AppState['sidebarMenuVisible']>) => void
   setStatusFilterVisible: (key: string, v: boolean) => void
   setEnableDoubleClickSelect: (v: boolean) => void
+  setReduceGlass: (v: boolean) => void
+  setReduceMotion: (v: boolean) => void
+  setMoreContrast: (v: boolean) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -121,11 +131,11 @@ export const useAppStore = create<AppState>()(
       sidebarWidth: 300,
       columns: defaultColumns,
       session: null,
-      isTrimOS: false,
       wsStatus: 'connecting',
       torrentSites: {},
       fontSize: 16,
       singleLine: true,
+      showCheckboxes: true,
       sidebarMenuVisible: { status: true, labels: true, dirs: true, sites: true, error: true },
       statusFilterVisible: {},
       enableDoubleClickSelect: false,
@@ -133,12 +143,17 @@ export const useAppStore = create<AppState>()(
       showStats: true,
       viewMode: 'grid',
       sidebarCollapsed: { labels: false, dirs: false, sites: false, error: false },
+      reduceGlass: false,
+      reduceMotion: false,
+      moreContrast: false,
+      a11yTouched: false,
 
       setFontSize: (n) => set({ fontSize: n }),
       setGroupShowSize: (v) => set({ groupShowSize: v }),
       setShowStats: (v) => set({ showStats: v }),
       setViewMode: (m) => set({ viewMode: m }),
       setSingleLine: (v) => set({ singleLine: v }),
+      setShowCheckboxes: (v) => set({ showCheckboxes: v }),
       setTorrentSites: (s) => set({ torrentSites: s }),
       setWsStatus: (s) => set({ wsStatus: s }),
       setTorrents: (list) => set({ torrents: list }),
@@ -176,7 +191,6 @@ export const useAppStore = create<AppState>()(
       setColumns: (cols) => set({ columns: cols }),
       resetColumns: () => set({ columns: defaultColumns }),
       setSession: (s) => set({ session: s }),
-      setIsTrimOS: (v) => set({ isTrimOS: v }),
       setSidebarCollapsed: (patch) =>
         set((state) => ({ sidebarCollapsed: { ...state.sidebarCollapsed, ...patch } })),
       setSidebarMenuVisible: (patch) =>
@@ -184,6 +198,9 @@ export const useAppStore = create<AppState>()(
       setStatusFilterVisible: (key, v) =>
         set((state) => ({ statusFilterVisible: { ...state.statusFilterVisible, [key]: v } })),
       setEnableDoubleClickSelect: (v) => set({ enableDoubleClickSelect: v }),
+      setReduceGlass: (v) => set({ reduceGlass: v, a11yTouched: true }),
+      setReduceMotion: (v) => set({ reduceMotion: v, a11yTouched: true }),
+      setMoreContrast: (v) => set({ moreContrast: v, a11yTouched: true }),
     }),
     {
       name: 'tm-store',
@@ -198,6 +215,7 @@ export const useAppStore = create<AppState>()(
         sortOrder: state.sortOrder,
         fontSize: state.fontSize,
         singleLine: state.singleLine,
+        showCheckboxes: state.showCheckboxes,
         sidebarMenuVisible: state.sidebarMenuVisible,
         statusFilterVisible: state.statusFilterVisible,
         enableDoubleClickSelect: state.enableDoubleClickSelect,
@@ -205,6 +223,10 @@ export const useAppStore = create<AppState>()(
         showStats: state.showStats,
         viewMode: state.viewMode,
         sidebarCollapsed: state.sidebarCollapsed,
+        reduceGlass: state.reduceGlass,
+        reduceMotion: state.reduceMotion,
+        moreContrast: state.moreContrast,
+        a11yTouched: state.a11yTouched,
       }),
       // 兼容旧版本持久化数据：补齐新增字段，避免运行时 undefined 崩溃
       merge: (persisted, current) => {
@@ -220,6 +242,7 @@ export const useAppStore = create<AppState>()(
           filters: { ...defaultFilters, ...(p.filters ?? {}) },
           sidebarMenuVisible: p.sidebarMenuVisible ?? { status: true, labels: true, dirs: true, sites: true, error: true },
           statusFilterVisible: p.statusFilterVisible ?? {},
+          showCheckboxes: p.showCheckboxes ?? true,
           enableDoubleClickSelect: p.enableDoubleClickSelect ?? false,
           groupShowSize: p.groupShowSize ?? true,
           showStats: p.showStats ?? true,

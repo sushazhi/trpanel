@@ -5,7 +5,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/transmission-manager/backend/internal/automove"
+	"github.com/transmission-manager/backend/internal/config"
+	"github.com/transmission-manager/backend/internal/middleware"
 	"github.com/transmission-manager/backend/internal/models"
+	"github.com/transmission-manager/backend/internal/platform"
 	"github.com/transmission-manager/backend/internal/rpc"
 	"github.com/transmission-manager/backend/internal/rss"
 	"github.com/transmission-manager/backend/internal/state"
@@ -19,17 +22,38 @@ type Handler struct {
 	state    *state.Store
 	rss      *rss.Service
 	automove *automove.Service
+	plat     platform.Platform
 	dataDir  string
+	apiToken string
 }
 
-// NewHandler 创建处理器
-func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, rssSvc *rss.Service, moveSvc *automove.Service, dataDir string) *Handler {
-	return &Handler{rpc: manager, hub: hub, geo: geo, state: st, rss: rssSvc, automove: moveSvc, dataDir: dataDir}
+// NewHandler 创建处理器。
+// plat 提供宿主平台能力：本地文件读取白名单、同源判定策略、宿主专属路由（如 fnOS 应用更新）。
+func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, rssSvc *rss.Service, moveSvc *automove.Service, cfg *config.Config, plat platform.Platform) *Handler {
+	return &Handler{
+		rpc:      manager,
+		hub:      hub,
+		geo:      geo,
+		state:    st,
+		rss:      rssSvc,
+		automove: moveSvc,
+		plat:     plat,
+		dataDir:  cfg.DataDir,
+		apiToken: cfg.APIToken,
+	}
 }
 
-// Register 注册所有路由（本服务不做鉴权，访问控制交由飞牛统一认证/反向代理）
-func (h *Handler) Register(r *gin.Engine) {
-	api := r.Group("/api")
+// Register 注册所有路由。
+// 身份认证默认交由宿主网关或反向代理承担，但本服务仍强制校验写请求的同源性
+// （否则任意网页都能以「简单请求」直接增删种子），并在配置了 API_TOKEN 时启用令牌鉴权。
+// prefix：网关部署时传入（如 /app/transmission），路由直接挂在带前缀路径下；
+// Gin 在中间件执行前即按原始 URL.Path 匹配路由，故不能在中间件里改前缀。
+func (h *Handler) Register(r *gin.Engine, prefix string) {
+	guard := []gin.HandlerFunc{middleware.SameOriginWriteGuard(h.plat)}
+	if h.apiToken != "" {
+		guard = append(guard, middleware.Auth(h.apiToken))
+	}
+	api := r.Group(prefix+"/api", guard...)
 	{
 		// 种子
 		api.GET("/torrents", h.listTorrents)
@@ -90,8 +114,14 @@ func (h *Handler) Register(r *gin.Engine) {
 		// 系统命令
 		api.POST("/system/:action", h.systemCommand)
 	}
+	// 宿主平台专属接口（如 fnOS 的应用更新；通用平台为空实现，不挂载任何路由）
+	h.plat.RegisterRoutes(api)
 	// WebSocket
-	r.GET("/ws", h.hub.HandleWS)
+	wsGuard := []gin.HandlerFunc{}
+	if h.apiToken != "" {
+		wsGuard = append(wsGuard, middleware.Auth(h.apiToken))
+	}
+	r.GET(prefix+"/ws", append(wsGuard, h.hub.HandleWS)...)
 }
 
 // respond 成功响应

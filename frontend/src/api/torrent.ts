@@ -25,6 +25,9 @@ export const torrentApi = {
   // 添加种子（URL/磁力链接）
   addUrl: (url: string, downloadDir?: string, paused = false, labels?: string[], priority?: number, verify = false) =>
     request<{ id: number }>(client.post('/torrents/add', { url, downloadDir, paused, verify, labels, bandwidthPriority: priority })),
+  // 添加种子（NAS 路径，飞牛文件选择器选中）
+  addByPath: (path: string, downloadDir?: string, paused = false, labels?: string[], priority?: number, verify = false) =>
+    request<{ id: number }>(client.post('/torrents/add', { path, downloadDir, paused, verify, labels, bandwidthPriority: priority })),
   // 批量添加多个URL/磁力链接
   addUrls: (urls: string[], downloadDir?: string, paused = false, labels?: string[], priority?: number, verify = false) =>
     request<{ ids: number[] }>(client.post('/torrents/add-batch', { urls, downloadDir, paused, verify, labels, bandwidthPriority: priority })),
@@ -106,4 +109,34 @@ export const autoMoveApi = {
   save: (rule: AutoMoveRule) => request<{ id: string }>(client.post('/automove', rule)),
   remove: (id: string) => request(client.delete(`/automove/${id}`)),
   run: () => request(client.post('/automove/run')),
+}
+
+// 检查更新（飞牛部署：后端查 GitHub Releases，gh-proxy 回退下载 fpk 更新包）
+export interface UpdateCheckResult {
+  currentVersion: string
+  latestVersion: string
+  hasUpdate: boolean
+  changelog: string
+  publishedAt: string
+  releaseUrl: string
+  fpkUrl: string
+  fpkSize: number
+  arch: string
+  downloadReady: boolean
+}
+
+export interface UpdateStatus {
+  updating: boolean
+  failed: boolean
+  progress: number
+  message: string
+  latestVersion: string
+  fpkFilename: string
+  downloadUrl?: string
+}
+
+export const updateApi = {
+  check: () => request<UpdateCheckResult>(client.get('/update/check')),
+  install: () => request<{ message: string }>(client.post('/update/install')),
+  status: () => request<UpdateStatus>(client.get('/update/status')),
 }

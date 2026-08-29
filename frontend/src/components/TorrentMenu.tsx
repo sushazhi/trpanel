@@ -27,7 +27,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
-import { trimPickFolder, useTrimEnv } from '@/hooks/useTrimEnv'
+import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
 import type { Torrent } from '@/types'
 import { toast } from '@/lib/toast'
@@ -73,8 +73,8 @@ export interface MenuCtx {
   t: (key: string) => string
   onOpenDetail: (t: Torrent) => void
   onEdit: (mode: EditMode, t: Torrent) => void
-  // 飞牛壳内才显示「打开目录」（trimOpenPath 依赖飞牛 SDK）
-  isTrimOS?: boolean
+  // 宿主支持「在文件管理器中定位目录」时才显示该项
+  canRevealPath?: boolean
   // 打开「批量删除达标种子」对话框（全局操作，入口放在种子右键菜单底部）
   onOpenBatchClean?: () => void
 }
@@ -109,7 +109,7 @@ export function buildTorrentMenu(ctx: MenuCtx, torrent: Torrent): MenuItem[] {
     { key: 'reannounce', label: t('action.reannounce'), icon: primaryIcon(<RefreshCw className="w-4 h-4" />) },
     { key: 'path', label: t('action.changePath'), icon: primaryIcon(<FolderOpen className="w-4 h-4" />) },
     { key: 'rename', label: t('action.rename'), icon: primaryIcon(<Pencil className="w-4 h-4" />) },
-    ...(ctx.isTrimOS
+    ...(ctx.canRevealPath
       ? [{ key: 'openDir', label: t('action.openDir'), icon: primaryIcon(<Folder className="w-4 h-4" />) }]
       : []),
     { type: 'divider' },
@@ -153,7 +153,7 @@ function renderItems(items: MenuItem[], onClick: (key: string) => void) {
             {item.icon}
             {item.label}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="glass-panel-strong min-w-36">
+          <DropdownMenuSubContent className="glass-panel-solid min-w-36">
             {renderItems(item.children, onClick)}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
@@ -236,10 +236,10 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
             disabled={item.disabled}
             onClick={() => onPick(item.key as string)}
             className={cn(
-              'w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left',
+              'w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left focus-visible:outline-none',
               item.danger
-                ? 'text-red-500 hover:bg-red-500/10'
-                : 'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary',
+                ? 'text-red-500 hover:bg-red-500/10 focus-visible:bg-red-500/10'
+                : 'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:bg-primary/10 focus-visible:text-primary',
               item.disabled && 'opacity-40 pointer-events-none',
             )}
           >
@@ -296,7 +296,7 @@ function CtxSubMenu({ item, onPick }: { item: MenuItem; onPick: (key: string) =>
             openMenu()
           }
         }}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary"
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:bg-primary/10 focus-visible:text-primary"
       >
         {item.icon}
         {item.label}
@@ -308,7 +308,7 @@ function CtxSubMenu({ item, onPick }: { item: MenuItem; onPick: (key: string) =>
         // 若外层带玻璃样式且不设坐标，子菜单会被定位到视口外
         <SubMenuPositioned pos={pos}>
           <div
-            className="glass-panel-strong min-w-36 rounded-xl p-1"
+            className="glass-panel-solid min-w-36 rounded-xl p-1"
             onMouseEnter={cancelClose}
             onMouseLeave={closeSoon}
           >
@@ -322,10 +322,10 @@ function CtxSubMenu({ item, onPick }: { item: MenuItem; onPick: (key: string) =>
                   disabled={child.disabled}
                   onClick={() => onPick(child.key as string)}
                   className={cn(
-                    'w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left',
+                    'w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left focus-visible:outline-none',
                     child.danger
-                      ? 'text-red-500 hover:bg-red-500/10'
-                      : 'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary',
+                      ? 'text-red-500 hover:bg-red-500/10 focus-visible:bg-red-500/10'
+                      : 'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:bg-primary/10 focus-visible:text-primary',
                     child.disabled && 'opacity-40 pointer-events-none',
                   )}
                 >
@@ -486,7 +486,7 @@ function Segmented<T extends string | number>({ value, options, onChange }: {
 // ========== 编辑弹窗（路径/标签/Tracker/重命名/限速等） ==========
 export function EditModals({ target, onClose }: { target: EditTarget | null; onClose: () => void }) {
   const { t } = useTranslation()
-  const { isTrimOS } = useTrimEnv()
+  const { can, pickFolder } = usePlatform()
   // 全库已有标签（供编辑标签时下拉选择，对齐 .ref-transmission-web 的 labelsOptions）
   const allTorrents = useAppStore((s) => s.torrents)
   const allLabels = useMemo(
@@ -610,7 +610,7 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{titleMap[mode]}</DialogTitle>
         </DialogHeader>
@@ -620,11 +620,11 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
             <div className="space-y-3">
               <div className="flex gap-2">
                 <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/downloads" />
-                {isTrimOS && (
+                {can('fs.pickFolder') && (
                   <Button
                     variant="outline"
                     onClick={async () => {
-                      const p = await trimPickFolder()
+                      const p = await pickFolder()
                       if (p) setPath(p)
                     }}
                   >
@@ -694,7 +694,7 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
                     <SelectTrigger className="h-8 w-28 text-footnote">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="glass-panel-strong">
+                    <SelectContent className="glass-panel-solid">
                       <SelectItem value="0">{t('limits.ratioGlobal')}</SelectItem>
                       <SelectItem value="1">{t('limits.ratioTorrent')}</SelectItem>
                       <SelectItem value="2">{t('limits.ratioUnlimited')}</SelectItem>

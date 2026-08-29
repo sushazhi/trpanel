@@ -42,7 +42,7 @@ export function ConfirmHost() {
 
   return (
     <Dialog open={!!state} onOpenChange={(open) => { if (!open) close(false) }}>
-      <DialogContent className="glass-panel-strong sm:max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{state?.title}</DialogTitle>
           {state?.content && <DialogDescription>{state.content}</DialogDescription>}

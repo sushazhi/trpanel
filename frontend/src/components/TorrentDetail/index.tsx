@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, File, Folder, FolderOpen, Pencil, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
-import { trimOpenPath, useTrimEnv } from '@/hooks/useTrimEnv'
+import { useRevealPath } from '@/hooks/useRevealPath'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
+import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
 import type { Torrent } from '@/types'
 import { formatBytes, formatDate, formatDuration, formatPercent, formatSpeed } from '@/utils/format'
+import { translateError } from '@/utils/errorText'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { EditModals } from '@/components/TorrentMenu'
@@ -20,6 +22,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -51,7 +59,7 @@ function collectLeaves(n: FileNode): number[] {
 // ========== 详情信息网格（替代 antd Descriptions） ==========
 function InfoGrid({ items }: { items: { key: string; label: string; children: React.ReactNode }[] }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 rounded-xl border border-gray-200/40 dark:border-gray-700/30 bg-white/40 dark:bg-gray-800/30 p-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 glass-subcard rounded-tile p-3">
       {items.map((item) => (
         <div key={item.key} className="flex justify-between gap-3 min-w-0">
           <span className="text-gray-500 dark:text-gray-400 text-footnote shrink-0 pt-0.5">{item.label}</span>
@@ -105,7 +113,7 @@ function FileRow({ node, depth, wanted, priorities, selectedRows, onToggleFile, 
         style={{ paddingLeft: depth * 20 + 8 }}
       >
         {isDir ? (
-          <button onClick={() => setOpen(!open)} className="w-3.5 h-3.5 flex items-center justify-center text-gray-400 shrink-0">
+          <button onClick={() => setOpen(!open)} className="w-7 h-7 -m-1.5 flex items-center justify-center text-gray-400 shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
             <ChevronRight className={cn('w-3.5 h-3.5 transition-transform', open && 'rotate-90')} />
           </button>
         ) : (
@@ -117,7 +125,7 @@ function FileRow({ node, depth, wanted, priorities, selectedRows, onToggleFile, 
         <span className="truncate flex-1" title={node.path}>{node.name}</span>
         <button
           onClick={() => onRename(node)}
-          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-primary shrink-0 transition-opacity"
+          className="p-2 -m-2 rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-gray-400 hover:text-primary shrink-0 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           title={t('detail.rename')}
         >
           <Pencil className="w-3 h-3" />
@@ -141,10 +149,10 @@ function FileRow({ node, depth, wanted, priorities, selectedRows, onToggleFile, 
           value={node._i >= 0 ? String(priorities[node._i]) : node.priority >= 0 ? String(node.priority) : 'none'}
           onValueChange={(v) => onChangePriority(node, Number(v))}
         >
-          <SelectTrigger className="h-7 w-24 text-footnote shrink-0">
+          <SelectTrigger className="h-8 w-24 text-footnote shrink-0">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="glass-panel-strong">
+          <SelectContent className="glass-panel-solid">
             <SelectItem value="-1">{t('action.priorityLow')}</SelectItem>
             <SelectItem value="0">{t('action.priorityNormal')}</SelectItem>
             <SelectItem value="1">{t('action.priorityHigh')}</SelectItem>
@@ -210,6 +218,8 @@ function SimpleTable<T>({ columns, data, emptyText }: { columns: TableColumn<T>[
 // ========== 块位图（对齐 PiecesTab：canvas 渲染） ==========
 function PiecesView({ torrent }: { torrent: Torrent }) {
   const { t } = useTranslation()
+  const theme = useAppStore((s) => s.theme)
+  const themePreset = useAppStore((s) => s.themePreset)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [hover, setHover] = useState(-1)
@@ -264,14 +274,19 @@ function PiecesView({ torrent }: { torrent: Torrent }) {
     canvas.height = rows * (CELL + GAP)
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    const css = getComputedStyle(document.documentElement)
+    const token = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback
+    const doneColor = token('--color-green-500', '#22c55e')
+    const activeColor = token('--color-blue-500', '#3b82f6')
+    const pendingColor = theme === 'dark' ? token('--color-gray-700', '#3f3f46') : token('--color-gray-200', '#e5e7eb')
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     for (let i = 0; i < count; i++) {
       const x = (i % cols) * (CELL + GAP)
       const y = Math.floor(i / cols) * (CELL + GAP)
-      ctx.fillStyle = bits[i] ? '#22c55e' : (i === activeIdx ? '#3b82f6' : '#e5e7eb')
+      ctx.fillStyle = bits[i] ? doneColor : i === activeIdx ? activeColor : pendingColor
       ctx.fillRect(x, y, CELL, CELL)
     }
-  }, [bits, count, cols, activeIdx])
+  }, [bits, count, cols, activeIdx, theme, themePreset])
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
@@ -311,15 +326,15 @@ function PiecesView({ torrent }: { torrent: Torrent }) {
       )}
       <div className="flex items-center gap-3 text-footnote text-gray-500">
         <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-[2px] bg-green-500 inline-block" />
+          <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
           {t('detail.pieceDone')}
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-[2px] bg-blue-500 inline-block" />
+          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
           {t('detail.pieceDownloading')}
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-[2px] bg-gray-200 inline-block" />
+          <span className="w-2.5 h-2.5 rounded-full bg-gray-200 inline-block" />
           {t('detail.piecePending')}
         </span>
       </div>
@@ -327,10 +342,11 @@ function PiecesView({ torrent }: { torrent: Torrent }) {
   )
 }
 
-// 种子详情（文件/Peers/Trackers）
-export function TorrentDetail({ torrent, onClose, onOpenChange }: { torrent: Torrent | null; onClose: () => void; onOpenChange?: (open: boolean) => void }) {
+// 种子详情（文件/Peers/Trackers）；移动端以底部 Sheet 呈现，桌面端为居中 Dialog
+export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { torrent: Torrent | null; onClose: () => void; onOpenChange?: (open: boolean) => void; isMobile?: boolean }) {
   const { t } = useTranslation()
-  const { isTrimOS } = useTrimEnv()
+  const { can } = usePlatform()
+  const revealPath = useRevealPath()
   const actions = useTorrentActions()
   const [detail, setDetail] = useState<Torrent | null>(null)
   const [loading, setLoading] = useState(false)
@@ -432,7 +448,7 @@ export function TorrentDetail({ torrent, onClose, onOpenChange }: { torrent: Tor
       { key: 'downloadSpeed', label: t('detail.downloadSpeed'), children: formatSpeed(detail.rateDownload) },
       { key: 'uploadSpeed', label: t('detail.uploadSpeed'), children: formatSpeed(detail.rateUpload) },
       { key: 'connectedPeers', label: t('detail.connectedPeers'), children: detail.peersConnected },
-      { key: 'error', label: t('detail.error'), children: detail.errorString || '-' },
+      { key: 'error', label: t('detail.error'), children: translateError(detail.errorString, t) || '-' },
       { key: 'labels', label: t('detail.labels'), children: detail.labels?.length ? detail.labels.join(', ') : '-' },
       { key: 'private', label: t('detail.private'), children: detail.isPrivate ? t('common.yes') : t('common.no') },
       { key: 'mainTracker', label: t('detail.mainTracker'), children: detail.trackerStats?.[0]?.host || detail.trackerStats?.[0]?.announce || '-' },
@@ -633,9 +649,9 @@ export function TorrentDetail({ torrent, onClose, onOpenChange }: { torrent: Tor
 
   const body = detail ? (
     <div className="space-y-3">
-      {isTrimOS && detail.downloadDir && (
+      {can('fs.revealPath') && detail.downloadDir && (
         <div className="flex justify-end">
-          <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => trimOpenPath(detail.downloadDir)}>
+          <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => void revealPath(detail.downloadDir)}>
             <FolderOpen className="w-3.5 h-3.5" />
             {t('action.openDir')}
           </Button>
@@ -659,16 +675,16 @@ export function TorrentDetail({ torrent, onClose, onOpenChange }: { torrent: Tor
                 value={fileQuery}
                 onChange={(e) => setFileQuery(e.target.value)}
                 placeholder={t('detail.fileSearch')}
-                className="h-7 pl-8 text-footnote"
+                className="h-8 pl-8 text-footnote"
               />
             </div>
-            <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => setAllWanted(true)}>{t('detail.selectAllFiles')}</Button>
-            <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => setAllWanted(false)}>{t('detail.deselectAllFiles')}</Button>
+            <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => setAllWanted(true)}>{t('detail.selectAllFiles')}</Button>
+            <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => setAllWanted(false)}>{t('detail.deselectAllFiles')}</Button>
             <Select onValueChange={(v) => setPriorities((p) => p.map(() => Number(v)))}>
-              <SelectTrigger className="h-7 w-28 text-footnote">
+              <SelectTrigger className="h-8 w-28 text-footnote">
                 <SelectValue placeholder={t('detail.setAllPriority')} />
               </SelectTrigger>
-              <SelectContent className="glass-panel-strong">
+              <SelectContent className="glass-panel-solid">
                 {prioOptions.map((o) => (
                   <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
                 ))}
@@ -678,14 +694,14 @@ export function TorrentDetail({ torrent, onClose, onOpenChange }: { torrent: Tor
               <>
                 <span className="text-footnote text-blue-500">{`${t('detail.selectedFiles')} ${selectedRows.size}`}</span>
                 {prioOptions.map((o) => (
-                  <Button key={o.value} size="sm" variant="outline" className="h-7 text-footnote" onClick={() => batchChangePriority(o.value)}>{o.label}</Button>
+                  <Button key={o.value} size="sm" variant="outline" className="h-8 text-footnote" onClick={() => batchChangePriority(o.value)}>{o.label}</Button>
                 ))}
-                <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => batchChangeWanted(true)}>{t('detail.download')}</Button>
-                <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => batchChangeWanted(false)}>{t('detail.skip')}</Button>
+                <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => batchChangeWanted(true)}>{t('detail.download')}</Button>
+                <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => batchChangeWanted(false)}>{t('detail.skip')}</Button>
               </>
             )}
             <div className="flex-1" />
-            <Button size="sm" className="h-7 text-footnote" disabled={loading} onClick={saveFiles}>{t('common.save')}</Button>
+            <Button size="sm" className="h-8 text-footnote" disabled={loading} onClick={saveFiles}>{t('common.save')}</Button>
           </div>
 
           {/* 文件表头 */}
@@ -729,12 +745,12 @@ export function TorrentDetail({ torrent, onClose, onOpenChange }: { torrent: Tor
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-footnote"
+              className="h-8 text-footnote"
               onClick={() => { void actions.reannounce(detail.id); toast.success(t('toast.reannounced')) }}
             >
               {t('detail.reannounce')}
             </Button>
-            <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => setEditTarget({ torrent: detail, mode: 'trackers' })}>{t('action.editTrackers')}</Button>
+            <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => setEditTarget({ torrent: detail, mode: 'trackers' })}>{t('action.editTrackers')}</Button>
           </div>
           {(() => {
             const stats = detail.trackerStats ?? []
@@ -744,7 +760,7 @@ export function TorrentDetail({ torrent, onClose, onOpenChange }: { torrent: Tor
             }
             return tiers.map((tier) => (
               <div key={tier} className="mb-3">
-                <div className="text-footnote text-gray-500 font-medium mb-1">Tier {tier + 1}</div>
+                <div className="text-footnote text-gray-500 font-medium mb-1">{t('detail.trackerTier', { n: tier + 1 })}</div>
                 <SimpleTable
                   columns={trackerColumns}
                   data={stats.filter((s) => s.tier === tier) as unknown as Record<string, unknown>[]}
@@ -769,19 +785,32 @@ export function TorrentDetail({ torrent, onClose, onOpenChange }: { torrent: Tor
 
   return (
     <>
-      <Dialog open={!!torrent} onOpenChange={(o) => { if (!o) closeDetail() }}>
-        <DialogContent className="glass-panel-strong sm:max-w-3xl h-[90vh] sm:h-auto sm:max-h-[85vh] flex flex-col p-0">
-          <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
-            <DialogTitle className="flex items-center gap-2 text-subhead pr-8">
-              <span className="truncate">{torrent?.name}</span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto px-4 py-3">{body}</div>
-        </DialogContent>
-      </Dialog>
+      {isMobile ? (
+        <Sheet open={!!torrent} onOpenChange={(o) => { if (!o) closeDetail() }}>
+          <SheetContent onDismiss={closeDetail} className="max-w-none max-h-[88vh] flex flex-col">
+            <SheetHeader className="px-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
+              <SheetTitle className="text-subhead pr-8">
+                <span className="block truncate">{torrent?.name}</span>
+              </SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">{body}</div>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={!!torrent} onOpenChange={(o) => { if (!o) closeDetail() }}>
+          <DialogContent className="sm:max-w-3xl h-[90vh] sm:h-auto sm:max-h-[85vh] flex flex-col p-0">
+            <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
+              <DialogTitle className="flex items-center gap-2 text-subhead pr-8">
+                <span className="truncate">{torrent?.name}</span>
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-3">{body}</div>
+          </DialogContent>
+        </Dialog>
+      )}
       {/* 文件/目录重命名 */}
       <Dialog open={!!renameTarget} onOpenChange={(o) => { if (!o) setRenameTarget(null) }}>
-        <DialogContent className="glass-panel-strong sm:max-w-md">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t('detail.rename')}</DialogTitle>
           </DialogHeader>

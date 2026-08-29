@@ -1,0 +1,459 @@
+package fnos
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/transmission-manager/backend/internal/models"
+)
+
+// fnOS 应用更新：GitHub Release 检测最新版 + gh-proxy 回退下载 fpk 包
+const (
+	updateRepo        = "sushazhi/Transmission-WebUI-for-fnOS"
+	updateAPIBase     = "https://api.github.com"
+	updateProxyMain   = "https://gh-proxy.com/"
+	updateProxyBackup = "https://gh-proxy.org/"
+	updateCheckTTL    = 5 * time.Minute
+	fpkMaxSize        = 100 << 20 // 100 MB
+	downloadTimeout   = 3 * time.Minute
+	defaultAppVersion = "1.0.0"
+)
+
+var (
+	reFPKVersion  = regexp.MustCompile(`-([\d][\d.]*)-(?:amd64|arm64)\.fpk$`)
+	reManifestVer = regexp.MustCompile(`(?i)^\s*version\s*=\s*(.+?)\s*$`)
+)
+
+// appArch 当前部署架构（fnOS 仅提供 amd64 / arm64 更新包）
+func appArch() string {
+	switch a := strings.ToLower(runtime.GOARCH); a {
+	case "arm64", "aarch64", "armv8l":
+		return "arm64"
+	default:
+		return "amd64"
+	}
+}
+
+// fpkPath 已下载的更新包落盘位置
+func fpkPath() string {
+	return filepath.Join(os.TempDir(), "transmission-update.fpk")
+}
+
+// currentAppVersion 优先读 fnOS 运行时注入的版本信息，退回宿主机上的应用 manifest
+func currentAppVersion() string {
+	if v := os.Getenv("TRIM_APPVER"); v != "" {
+		return v
+	}
+	paths := []string{}
+	if dest := os.Getenv("TRIM_APPDEST"); dest != "" {
+		paths = append(paths, filepath.Join(dest, "manifest"))
+	}
+	paths = append(paths, "/var/apps/transmission/manifest")
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if m := reManifestVer.FindStringSubmatch(line); m != nil {
+				return m[1]
+			}
+		}
+	}
+	return defaultAppVersion
+}
+
+// compareAppVersion 语义化版本比较：latest 更新返回 1，相同 0，更旧 -1
+func compareAppVersion(current, latest string) int {
+	parse := func(v string) []int {
+		parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(v), "v"), ".")
+		out := make([]int, len(parts))
+		for i, p := range parts {
+			n, _ := strconv.Atoi(p)
+			out[i] = n
+		}
+		return out
+	}
+	a, b := parse(current), parse(latest)
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var x, y int
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			if y > x {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
+type githubRelease struct {
+	TagName     string `json:"tag_name"`
+	Body        string `json:"body"`
+	PublishedAt string `json:"published_at"`
+	HTMLURL     string `json:"html_url"`
+	Assets      []struct {
+		Name               string `json:"name"`
+		BrowserDownloadURL string `json:"browser_download_url"`
+		Size               int64  `json:"size"`
+	} `json:"assets"`
+}
+
+type releaseInfo struct {
+	Version     string
+	Changelog   string
+	PublishedAt string
+	ReleaseURL  string
+	FPKURL      string
+	FPKName     string
+	FPKSize     int64
+}
+
+// fetchLatestRelease 查询 GitHub 最新 Release 并按架构挑选 fpk 更新包
+func fetchLatestRelease() (*releaseInfo, error) {
+	url := fmt.Sprintf("%s/repos/%s/releases/latest", updateAPIBase, updateRepo)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "fnos-transmission-webui-updater")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("无法连接 GitHub: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub 返回 HTTP %d（仓库可能尚未发布 Release）", resp.StatusCode)
+	}
+	var rel githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, fmt.Errorf("解析版本信息失败: %w", err)
+	}
+	arch := appArch()
+	archSuffix := "-" + arch + ".fpk"
+	var fpkURL, fpkName string
+	var fpkSize int64
+	for _, a := range rel.Assets {
+		if strings.HasSuffix(a.Name, archSuffix) && strings.Contains(strings.ToLower(a.Name), "transmission") {
+			fpkURL, fpkName, fpkSize = a.BrowserDownloadURL, a.Name, a.Size
+			break
+		}
+	}
+	if fpkURL == "" {
+		for _, a := range rel.Assets {
+			if strings.HasSuffix(a.Name, ".fpk") {
+				fpkURL, fpkName, fpkSize = a.BrowserDownloadURL, a.Name, a.Size
+				break
+			}
+		}
+	}
+	return &releaseInfo{
+		Version:     strings.TrimPrefix(rel.TagName, "v"),
+		Changelog:   rel.Body,
+		PublishedAt: rel.PublishedAt,
+		ReleaseURL:  rel.HTMLURL,
+		FPKURL:      fpkURL,
+		FPKName:     fpkName,
+		FPKSize:     fpkSize,
+	}, nil
+}
+
+// updateService 更新检测/下载状态（进程内单例，含检查结果缓存）
+type updateService struct {
+	mu       sync.Mutex
+	updating bool
+	failed   bool
+	progress int
+	message  string
+	latest   string
+	fpkName  string
+	cached   gin.H
+	cachedAt time.Time
+}
+
+func newUpdateService() *updateService { return &updateService{} }
+
+// updateHandler fnOS 应用更新接口（仅在 fnOS 平台注册）
+type updateHandler struct {
+	svc *updateService
+}
+
+func newUpdateHandler() *updateHandler {
+	return &updateHandler{svc: newUpdateService()}
+}
+
+// RegisterRoutes 挂载更新相关路由
+func (u *updateHandler) RegisterRoutes(g *gin.RouterGroup) {
+	g.GET("/update/check", u.check)
+	g.POST("/update/install", u.install)
+	g.GET("/update/status", u.status)
+	g.GET("/update/download", u.download)
+}
+
+// check GET /api/update/check 检查是否有新版本（结果缓存 5 分钟）
+func (u *updateHandler) check(c *gin.Context) {
+	svc := u.svc
+	svc.mu.Lock()
+	if svc.cached != nil && time.Since(svc.cachedAt) < updateCheckTTL {
+		result := svc.cached
+		svc.mu.Unlock()
+		respond(c, result)
+		return
+	}
+	svc.mu.Unlock()
+
+	info, err := fetchLatestRelease()
+	if err != nil {
+		slog.Warn("检查更新失败", "err", err)
+		respondError(c, http.StatusInternalServerError, "检查更新失败: "+err.Error())
+		return
+	}
+	cur := currentAppVersion()
+	hasUpdate := compareAppVersion(cur, info.Version) > 0
+	if hasUpdate && info.FPKURL == "" {
+		// 新版本没有当前架构的更新包时不提示更新，避免用户点了却无法安装
+		hasUpdate = false
+	}
+	result := gin.H{
+		"currentVersion": cur,
+		"latestVersion":  info.Version,
+		"hasUpdate":      hasUpdate,
+		"changelog":      info.Changelog,
+		"publishedAt":    info.PublishedAt,
+		"releaseUrl":     info.ReleaseURL,
+		"fpkUrl":         info.FPKURL,
+		"fpkSize":        info.FPKSize,
+		"arch":           appArch(),
+		"downloadReady":  fpkReady(info.FPKSize),
+	}
+	svc.mu.Lock()
+	svc.cached, svc.cachedAt = result, time.Now()
+	svc.mu.Unlock()
+	respond(c, result)
+}
+
+// install POST /api/update/install 后台下载当前架构的 fpk 更新包
+func (u *updateHandler) install(c *gin.Context) {
+	svc := u.svc
+	svc.mu.Lock()
+	if svc.updating {
+		svc.mu.Unlock()
+		respondError(c, http.StatusConflict, "正在下载更新包，请稍候")
+		return
+	}
+	svc.mu.Unlock()
+
+	info, err := fetchLatestRelease()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "获取版本信息失败: "+err.Error())
+		return
+	}
+	if info.FPKURL == "" {
+		respondError(c, http.StatusBadRequest, "未找到当前架构的更新包")
+		return
+	}
+	if m := reFPKVersion.FindStringSubmatch(info.FPKName); m != nil && m[1] != info.Version {
+		respondError(c, http.StatusInternalServerError,
+			fmt.Sprintf("版本信息不一致: API 返回 %s，更新包指向 %s", info.Version, m[1]))
+		return
+	}
+
+	svc.mu.Lock()
+	svc.updating, svc.failed, svc.progress = true, false, 0
+	svc.message = "正在准备更新..."
+	svc.latest, svc.fpkName = info.Version, info.FPKName
+	svc.mu.Unlock()
+
+	go u.performUpdate(info)
+	respond(c, gin.H{"message": "开始下载更新包"})
+}
+
+// status GET /api/update/status 返回下载进度
+func (u *updateHandler) status(c *gin.Context) {
+	svc := u.svc
+	svc.mu.Lock()
+	result := gin.H{
+		"updating":      svc.updating,
+		"failed":        svc.failed,
+		"progress":      svc.progress,
+		"message":       svc.message,
+		"latestVersion": svc.latest,
+		"fpkFilename":   svc.fpkName,
+	}
+	svc.mu.Unlock()
+	if !result["updating"].(bool) && result["progress"].(int) >= 100 && fileExists(fpkPath()) {
+		result["downloadUrl"] = "/api/update/download"
+	}
+	respond(c, result)
+}
+
+// download GET /api/update/download 下发已下载的 fpk（供应用中心手动安装）
+func (u *updateHandler) download(c *gin.Context) {
+	path := fpkPath()
+	if !fileExists(path) {
+		respondError(c, http.StatusNotFound, "更新包不存在，请先点击一键更新")
+		return
+	}
+	name := u.svc.fpkName
+	if name == "" {
+		name = filepath.Base(path)
+	}
+	c.FileAttachment(path, name)
+}
+
+// performUpdate 依次走主代理/备用代理/直连下载 fpk，落盘并校验
+func (u *updateHandler) performUpdate(info *releaseInfo) {
+	svc := u.svc
+	set := func(progress int, message string) {
+		svc.mu.Lock()
+		svc.progress, svc.message = progress, message
+		svc.mu.Unlock()
+	}
+	defer func() {
+		svc.mu.Lock()
+		svc.updating = false
+		svc.mu.Unlock()
+	}()
+
+	dest := fpkPath()
+	urls := []string{updateProxyMain + info.FPKURL, updateProxyBackup + info.FPKURL, info.FPKURL}
+	messages := []string{"正在下载更新包...", "主代理下载失败，切换备用代理...", "备用代理下载失败，尝试直连..."}
+	lastErr := ""
+	for i, url := range urls {
+		set(10, messages[i])
+		if err := downloadFPK(url, dest, info, set); err != nil {
+			lastErr = err.Error()
+			slog.Warn("更新包下载失败", "url", url, "err", err)
+			continue
+		}
+		set(100, "下载完成")
+		return
+	}
+	svc.mu.Lock()
+	svc.failed, svc.progress = true, 0
+	svc.message = "更新失败: " + lastErr
+	svc.mu.Unlock()
+}
+
+// downloadFPK 单个 URL 的下载 + 校验（格式魔数 / 大小 / 上限），失败时清理临时文件
+func downloadFPK(url, dest string, info *releaseInfo, set func(int, string)) error {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	client := &http.Client{Timeout: downloadTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("网络错误: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("服务器返回 HTTP %d", resp.StatusCode)
+	}
+
+	tmp := dest + ".part"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	fail := func(format string, args ...interface{}) error {
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf(format, args...)
+	}
+
+	buf := make([]byte, 64*1024)
+	var downloaded int64
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := f.Write(buf[:n]); werr != nil {
+				return fail("写入失败: %v", werr)
+			}
+			downloaded += int64(n)
+			if downloaded > fpkMaxSize {
+				return fail("下载内容超过大小限制 (%d MB)", fpkMaxSize>>20)
+			}
+			if resp.ContentLength > 0 {
+				progress := 10 + int(downloaded*50/resp.ContentLength)
+				set(progress, fmt.Sprintf("正在下载... %.1fMB/%.1fMB",
+					float64(downloaded)/float64(1<<20), float64(resp.ContentLength)/float64(1<<20)))
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return fail("下载中断: %v", rerr)
+		}
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if downloaded == 0 {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("下载文件为空")
+	}
+	// fpk 实体是 tar.gz / zip 包，校验魔数防止把错误页存成更新包
+	head := make([]byte, 2)
+	if hf, err := os.Open(tmp); err == nil {
+		_, _ = hf.Read(head)
+		hf.Close()
+	}
+	gzipMagic := head[0] == 0x1f && head[1] == 0x8b
+	zipMagic := head[0] == 'P' && head[1] == 'K'
+	if !gzipMagic && !zipMagic {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("文件校验失败: 内容异常 (%q)", head)
+	}
+	if info.FPKSize > 0 && downloaded != info.FPKSize {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("文件大小不匹配: 期望 %d 字节, 实际 %d 字节", info.FPKSize, downloaded)
+	}
+	return os.Rename(tmp, dest)
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
+// fpkReady 本地已下载的更新包是否与目标版本大小一致
+func fpkReady(expectedSize int64) bool {
+	st, err := os.Stat(fpkPath())
+	if err != nil || st.IsDir() {
+		return false
+	}
+	return expectedSize <= 0 || st.Size() == expectedSize
+}
+
+// respond / respondError 复用统一响应格式（平台包不依赖 api 包，避免循环引用）
+func respond(c *gin.Context, data interface{}) {
+	c.JSON(http.StatusOK, models.OK(data))
+}
+
+func respondError(c *gin.Context, status int, msg string) {
+	c.JSON(status, models.Error(msg))
+}

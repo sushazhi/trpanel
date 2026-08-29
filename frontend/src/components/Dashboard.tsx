@@ -59,7 +59,7 @@ export function Dashboard({ open, onClose }: { open: boolean; onClose: () => voi
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-3xl h-[90vh] sm:h-auto sm:max-h-[85vh] flex flex-col p-0">
+      <DialogContent className="sm:max-w-3xl h-[90vh] sm:h-auto sm:max-h-[85vh] flex flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
           <DialogTitle>{t('dashboard.title')}</DialogTitle>
         </DialogHeader>

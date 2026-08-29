@@ -86,7 +86,7 @@ export function ReplaceTrackerDialog({ open, onClose }: { open: boolean; onClose
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t('replaceTracker.title')}</DialogTitle>
         </DialogHeader>
@@ -200,7 +200,7 @@ export function BatchCleanDialog({ open, onClose }: { open: boolean; onClose: ()
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t('batchClean.title')}</DialogTitle>
         </DialogHeader>
@@ -300,7 +300,7 @@ export function BatchMoveDialog({ open, ids, onClose }: { open: boolean; ids: nu
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t('action.changePath')} ({ids.length})</DialogTitle>
         </DialogHeader>
@@ -383,7 +383,7 @@ export function RemoveTorrentDialog({ open, ids, onClose }: { open: boolean; ids
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t('confirm.removeTitle')}</DialogTitle>
         </DialogHeader>

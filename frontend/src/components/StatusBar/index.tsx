@@ -3,6 +3,7 @@ import { CheckCircle, Clock, CloudDownload, Download, HardDrive, PauseCircle, Ro
 import { useTranslation } from 'react-i18next'
 import { sessionApi } from '@/api/torrent'
 import { useAppStore } from '@/stores/appStore'
+import { usePlatform } from '@/platform'
 import { cn } from '@/lib/utils'
 import { formatBytes } from '@/utils/format'
 import { Badge } from '@/components/ui/badge'
@@ -28,6 +29,7 @@ const STATUS_CONFIG: Record<number, { icon: React.ElementType; color: string; la
 // 图一状态栏：已连接 · PPC 免密认证 · 本次会话 ↓/↑ 流量
 export const StatusBar: React.FC<Props> = ({ isMobile }) => {
   const { t } = useTranslation()
+  const { can } = usePlatform()
   const torrents = useAppStore((s) => s.torrents)
   const wsStatus = useAppStore((s) => s.wsStatus)
   const session = useAppStore((s) => s.session)
@@ -105,16 +107,25 @@ export const StatusBar: React.FC<Props> = ({ isMobile }) => {
       : t('common.disconnected')
 
   return (
-    <div className="shrink-0 glass-panel-strong rounded-2xl h-9 flex items-center gap-2 px-4 text-footnote text-gray-500 dark:text-gray-400">
+    <div className="tm-dock glass-panel rounded-dock h-9 flex items-center gap-2 px-4 text-footnote text-gray-500 dark:text-gray-400 tm-glass-label">
       <div className="flex items-center gap-2 flex-wrap min-w-0">
         {/* 连接状态 */}
-        <span className={cn('flex items-center gap-1.5 shrink-0', wsStatus === 'connected' ? 'text-green-600 dark:text-green-400' : 'text-gray-400')}>
+        <span
+          role="status"
+          aria-live="polite"
+          className={cn('flex items-center gap-1.5 shrink-0', wsStatus === 'connected' ? 'text-green-600 dark:text-green-400' : 'text-gray-400')}
+        >
           <span className={cn('w-1.5 h-1.5 rounded-full', wsStatus === 'connected' ? 'bg-green-500' : 'bg-gray-400 animate-pulse')} />
           {statusText}
         </span>
 
-        <span className="text-gray-300 dark:text-gray-600 hidden sm:inline">·</span>
-        <span className="hidden sm:inline shrink-0">{t('common.passwordless')}</span>
+        {/* 免密认证由宿主统一承担；通用部署下没有这回事，不显示 */}
+        {can('auth.passwordless') && (
+          <>
+            <span className="text-gray-300 dark:text-gray-600 hidden sm:inline">·</span>
+            <span className="hidden sm:inline shrink-0">{t('common.passwordless')}</span>
+          </>
+        )}
 
         {/* 本次会话流量 */}
         {stats && (

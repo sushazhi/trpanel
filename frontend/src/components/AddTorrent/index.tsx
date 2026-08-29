@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Inbox, Search, X } from 'lucide-react'
+import { FolderOpen, Inbox, Search, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
-import { trimPickUserFile, useTrimEnv } from '@/hooks/useTrimEnv'
+import { usePlatform } from '@/platform'
 import { toast } from '@/lib/toast'
 import { TagInput } from '@/components/TagInput'
 import { Badge } from '@/components/ui/badge'
@@ -49,11 +49,13 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
   initialText?: string
 }) {
   const { t } = useTranslation()
-  const { isTrimOS } = useTrimEnv()
+  const { can, pickFiles } = usePlatform()
   const session = useAppStore((s) => s.session)
 
   const [tab, setTab] = useState<'file' | 'url'>('file')
   const [files, setFiles] = useState<File[]>([])
+  // 飞牛环境通过文件选择器选中的 NAS 种子路径
+  const [torrentPaths, setTorrentPaths] = useState<string[]>([])
   const [urlText, setUrlText] = useState('')
   const [downloadDir, setDownloadDir] = useState('')
   const [paused, setPaused] = useState(false)
@@ -71,6 +73,7 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
 
   const reset = () => {
     setFiles([])
+    setTorrentPaths([])
     setUrlText('')
     setDownloadDir('')
     setPaused(false)
@@ -154,12 +157,17 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
     localStorage.setItem(DIR_HISTORY_KEY, JSON.stringify(next))
   }
 
-  const handlePickFiles = async () => {
-    if (isTrimOS) {
-      const picked = await trimPickUserFile()
-      if (picked) setFiles((prev) => [...prev, picked])
-    } else {
-      fileInputRef.current?.click()
+  // 手动上传：本地文件选择 / 拖拽
+  const handlePickFiles = () => {
+    fileInputRef.current?.click()
+  }
+
+  // 从宿主选择种子：宿主文件选择器（返回宿主路径，后端按白名单读取 .torrent 添加）
+  const handlePickFromHost = async () => {
+    if (!can('fs.pickFiles')) return
+    const picked = await pickFiles()
+    if (picked?.length) {
+      setTorrentPaths((prev) => [...prev, ...picked])
     }
   }
 
@@ -201,6 +209,15 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
           }
         }
         if (fail > 0) setFiles((prev) => prev.filter((_, i) => !results[i]))
+        // NAS 路径种子（飞牛文件选择器选中）：后端直接读取路径文件添加
+        for (const p of torrentPaths) {
+          try {
+            await torrentApi.addByPath(p, downloadDir || undefined, paused, labels, priority, verify)
+            ok++
+          } catch {
+            fail++
+          }
+        }
       } else {
         if (urls.length > 1) {
           // 批量添加多个磁力链接
@@ -243,7 +260,7 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-[480px]">
+      <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>{t('addTorrent.title')}</DialogTitle>
         </DialogHeader>
@@ -289,6 +306,12 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
                 <Inbox className="w-8 h-8 text-gray-400 mx-auto" />
                 <p className="mt-2 text-body text-gray-500">{t('addTorrent.dropHint')}</p>
               </div>
+              {can('fs.pickFiles') && (
+                <Button variant="outline" className="w-full" onClick={handlePickFromHost}>
+                  <FolderOpen className="w-4 h-4 mr-2" />
+                  {t('addTorrent.pickFromNas')}
+                </Button>
+              )}
               {files.length > 0 && (
                 <div className="space-y-1 max-h-40 overflow-y-auto">
                   {files.map((f, i) => (
@@ -299,6 +322,25 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
                         size="icon"
                         className="h-6 w-6 text-gray-400 hover:text-red-500 shrink-0"
                         onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {torrentPaths.length > 0 && (
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {torrentPaths.map((p, i) => (
+                    <div key={p} className="flex items-center gap-2 text-body">
+                      <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 truncate flex-1 max-w-60">
+                        {p.split('/').pop() || p}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-gray-400 hover:text-red-500 shrink-0"
+                        onClick={() => setTorrentPaths((prev) => prev.filter((_, idx) => idx !== i))}
                       >
                         <X className="w-3.5 h-3.5" />
                       </Button>
@@ -343,7 +385,7 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
                               return next
                             })}
                             placeholder={t('addTorrent.searchFiles')}
-                            className="h-7 pl-8 text-footnote bg-white/50 dark:bg-white/5 border-white/60 dark:border-white/10 rounded-lg"
+                            className="h-8 pl-8 text-footnote bg-white/50 dark:bg-white/5 border-white/60 dark:border-white/10 rounded-lg"
                           />
                         </div>
                         <div className="max-h-44 overflow-y-auto space-y-0.5 pr-1">
@@ -400,7 +442,7 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
                 <SelectTrigger className="h-9 text-footnote">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="glass-panel-strong">
+                <SelectContent className="glass-panel-solid">
                   <SelectItem value="1">{t('action.priorityHigh')}</SelectItem>
                   <SelectItem value="0">{t('action.priorityNormal')}</SelectItem>
                   <SelectItem value="-1">{t('action.priorityLow')}</SelectItem>

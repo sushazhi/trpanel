@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, FolderOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { client, request } from '@/api/client'
-import { serverApi, sessionApi, torrentApi } from '@/api/torrent'
+import { APP_BASE } from '@/platform/appBase'
+import { serverApi, sessionApi, torrentApi, updateApi, type UpdateCheckResult, type UpdateStatus } from '@/api/torrent'
 import { AutoMoveManager } from '@/components/AutoMoveManager'
 import { RSSManager } from '@/components/RSSManager'
-import { trimPickFolder, useTrimEnv } from '@/hooks/useTrimEnv'
+import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -53,10 +54,13 @@ const timeToStr = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '
 const strToMin = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 60 + (m || 0) }
 
 // ========== 设置行 ==========
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 py-1.5">
-      <span className="text-body text-gray-600 dark:text-gray-300">{label}</span>
+      <div className="min-w-0">
+        <span className="text-body text-gray-600 dark:text-gray-300">{label}</span>
+        {hint && <p className="text-caption1 text-gray-400 mt-0.5">{hint}</p>}
+      </div>
       {children}
     </div>
   )
@@ -100,7 +104,7 @@ function DirInput({ field }: { field: 'downloadDir' | 'incompleteDir' }) {
   const session = useAppStore((s) => s.session)
   const setSession = useAppStore((s) => s.setSession)
   const { t } = useTranslation()
-  const { isTrimOS } = useTrimEnv()
+  const { can, pickFolder } = usePlatform()
   const serverValue = session?.[field] ?? ''
   const [draft, setDraft] = useState(serverValue)
   const [editing, setEditing] = useState(false)
@@ -123,9 +127,9 @@ function DirInput({ field }: { field: 'downloadDir' | 'incompleteDir' }) {
     }
   }
 
-  // 飞牛目录选择器：选中后直接填入并提交
+  // 宿主目录选择器：选中后直接填入并提交
   const pick = async () => {
-    const p = await trimPickFolder()
+    const p = await pickFolder()
     if (!p) return
     setDraft(p)
     await commit(p)
@@ -144,7 +148,7 @@ function DirInput({ field }: { field: 'downloadDir' | 'incompleteDir' }) {
         }}
         className="h-8 text-footnote flex-1 min-w-0"
       />
-      {isTrimOS && (
+      {can('fs.pickFolder') && (
         <Button
           type="button"
           variant="outline"
@@ -216,12 +220,139 @@ function SmallSelect({ value, onValueChange, options, className }: LabeledSelect
       <SelectTrigger className={cn('h-8 w-24 text-footnote', className)}>
         <SelectValue />
       </SelectTrigger>
-      <SelectContent className="glass-panel-strong">
+      <SelectContent className="glass-panel-solid">
         {options.map((o) => (
           <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+// ========== 关于与检查更新 ==========
+// 检查更新依赖宿主的 app.update 能力（后端也只在对应平台注册 /api/update 路由）
+function AboutSection({ transmissionVersion }: { transmissionVersion?: string }) {
+  const { t } = useTranslation()
+  const { can } = usePlatform()
+  const canUpdate = can('app.update')
+  const [info, setInfo] = useState<UpdateCheckResult | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [updStatus, setUpdStatus] = useState<UpdateStatus | null>(null)
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopPoll = () => {
+    if (timer.current) {
+      clearInterval(timer.current)
+      timer.current = null
+    }
+  }
+  useEffect(() => stopPoll, [])
+
+  const check = async () => {
+    setChecking(true)
+    setUpdStatus(null)
+    try {
+      setInfo(await updateApi.check())
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const startPolling = () => {
+    stopPoll()
+    timer.current = setInterval(async () => {
+      try {
+        const s = await updateApi.status()
+        setUpdStatus(s)
+        if (!s.updating) stopPoll()
+      } catch {
+        // 单次轮询失败不中断整体进度跟踪
+      }
+    }, 2000)
+  }
+
+  const install = async () => {
+    try {
+      await updateApi.install()
+      setUpdStatus({ updating: true, failed: false, progress: 0, message: '', latestVersion: info?.latestVersion ?? '', fpkFilename: '' })
+      startPolling()
+    } catch {
+      // 拦截器已提示
+    }
+  }
+
+  const downloading = !!updStatus?.updating
+  const done = !!updStatus && !updStatus.updating && updStatus.progress >= 100
+  const failed = !!updStatus && !updStatus.updating && updStatus.failed
+  // 本次检查前服务端已下载好更新包：无需再点一键更新，直接下载
+  const readyWithoutInstall = !!info?.downloadReady && !updStatus
+
+  return (
+    <div className="pt-3 mt-3 border-t border-gray-100 dark:border-gray-700 text-footnote text-gray-400">
+      <div className="flex items-center justify-between gap-2">
+        <span>
+          {t('session.about')}: Transmission WebUI{canUpdate ? ' for fnOS' : ''}
+          {transmissionVersion ? ` · Transmission ${transmissionVersion}` : ''}
+        </span>
+        {canUpdate && (
+          <Button size="sm" variant="outline" className="h-8 text-footnote shrink-0" disabled={checking || downloading} onClick={() => void check()}>
+            {checking ? t('common.loading') : t('session.checkUpdate')}
+          </Button>
+        )}
+      </div>
+      {canUpdate && <p className="mt-1">{t('session.checkUpdateHint')}</p>}
+      {info && (
+        <div className="mt-2 rounded-lg border border-gray-200/70 dark:border-gray-700/50 p-3 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {info.hasUpdate ? (
+              <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">{t('session.newVersionFound')}</Badge>
+            ) : (
+              <Badge className="bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">{t('session.alreadyLatest')}</Badge>
+            )}
+            <span>v{info.currentVersion} → v{info.latestVersion} ({info.arch})</span>
+          </div>
+          {info.hasUpdate && info.changelog && (
+            <div className="max-h-28 overflow-y-auto whitespace-pre-line text-gray-500 dark:text-gray-400">{info.changelog}</div>
+          )}
+          {info.hasUpdate && (
+            <div className="space-y-2">
+              {downloading && (
+                <div>
+                  <div className="h-1.5 rounded-full bg-gray-200/80 dark:bg-gray-700/60 overflow-hidden">
+                    <div className="h-full bg-primary transition-all" style={{ width: `${updStatus?.progress ?? 0}%` }} />
+                  </div>
+                  <p className="mt-1">{updStatus?.progress ?? 0}% · {updStatus?.message}</p>
+                </div>
+              )}
+              {failed && <p className="text-red-500">{updStatus?.message || t('session.updateFailed')}</p>}
+              {done || readyWithoutInstall ? (
+                <div className="space-y-1">
+                  <Button asChild size="sm" className="h-8 text-footnote">
+                    <a href={APP_BASE + '/api/update/download'} download={updStatus?.fpkFilename || undefined}>
+                      {t('session.downloadFpk')}
+                    </a>
+                  </Button>
+                  <p>{t('session.fpkInstallHint')}</p>
+                </div>
+              ) : info.fpkUrl ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button size="sm" className="h-8 text-footnote" disabled={downloading || checking} onClick={() => void install()}>
+                    {downloading ? t('session.updating') : t('session.updateNow')}
+                  </Button>
+                  {info.releaseUrl && (
+                    <Button asChild size="sm" variant="outline" className="h-8 text-footnote">
+                      <a href={info.releaseUrl} target="_blank" rel="noreferrer">{t('session.viewRelease')}</a>
+                    </Button>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -235,6 +366,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const setFontSize = useAppStore((s) => s.setFontSize)
   const singleLine = useAppStore((s) => s.singleLine)
   const setSingleLine = useAppStore((s) => s.setSingleLine)
+  const showCheckboxes = useAppStore((s) => s.showCheckboxes)
+  const setShowCheckboxes = useAppStore((s) => s.setShowCheckboxes)
+  const reduceGlass = useAppStore((s) => s.reduceGlass)
+  const reduceMotion = useAppStore((s) => s.reduceMotion)
+  const moreContrast = useAppStore((s) => s.moreContrast)
+  const setReduceGlass = useAppStore((s) => s.setReduceGlass)
+  const setReduceMotion = useAppStore((s) => s.setReduceMotion)
+  const setMoreContrast = useAppStore((s) => s.setMoreContrast)
 
   const [url, setUrl] = useState('')
   const [user, setUser] = useState('')
@@ -394,7 +533,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           className="h-8 text-footnote"
         />
       </div>
-      <Row label={t('session.pollInterval')}>
+      <Row label={t('session.pollInterval')} hint={t('session.pollIntervalHint')}>
         <SmallSelect
           value={pollInterval}
           onValueChange={setPollInterval}
@@ -406,14 +545,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           ]}
         />
       </Row>
-      <Row label={t('session.portTest')}>
+      <Row label={t('session.portTest')} hint={t('session.portTestHint')}>
         <div className="flex items-center gap-2">
           {portOpen !== null && (
             portOpen
               ? <Badge className="bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">{t('session.portOpen')}</Badge>
               : <Badge className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">{t('session.portClosed')}</Badge>
           )}
-          <Button size="sm" className="h-7 text-footnote" disabled={testingPort} onClick={testPort}>
+          <Button size="sm" className="h-8 text-footnote" disabled={testingPort} onClick={testPort}>
             {testingPort ? t('common.loading') : t('session.portTest')}
           </Button>
         </div>
@@ -423,19 +562,40 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 
   const uiPane = (
     <div className="space-y-1">
-      <Row label={t('session.fontSize')}>
+      <Row label={t('session.fontSize')} hint={t('session.fontSizeHint')}>
         <SmallSelect
           value={String(fontSize)}
           onValueChange={(v) => setFontSize(Number(v))}
           options={[12, 13, 14, 15, 16, 17, 18, 19, 20].map((n) => ({ value: String(n), label: `${n}px` }))}
         />
       </Row>
-      <Row label={t('session.singleLine')}>
+      <Row label={t('session.singleLine')} hint={t('session.singleLineHint')}>
         <Switch checked={singleLine} onCheckedChange={setSingleLine} />
       </Row>
+      <Row label={t('session.showCheckboxes')} hint={t('session.showCheckboxesHint')}>
+        <Switch checked={showCheckboxes} onCheckedChange={setShowCheckboxes} />
+      </Row>
+
+      <div className="pt-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-body font-semibold text-gray-700 dark:text-gray-200">{t('session.a11yTitle')}</span>
+          <span className="text-caption1 text-gray-400">{t('session.a11yHint')}</span>
+        </div>
+        <div className="space-y-1 mt-1">
+          <Row label={t('session.reduceGlass')} hint={t('session.reduceGlassHint')}>
+            <Switch checked={reduceGlass} onCheckedChange={setReduceGlass} />
+          </Row>
+          <Row label={t('session.reduceMotion')} hint={t('session.reduceMotionHint')}>
+            <Switch checked={reduceMotion} onCheckedChange={setReduceMotion} />
+          </Row>
+          <Row label={t('session.moreContrast')} hint={t('session.moreContrastHint')}>
+            <Switch checked={moreContrast} onCheckedChange={setMoreContrast} />
+          </Row>
+        </div>
+      </div>
 
       <Row label={t('session.clearDirHistory')}>
-        <Button size="sm" variant="outline" className="h-7 text-footnote" onClick={() => { localStorage.removeItem('tm_dirs'); toast.success(t('toast.updated')) }}>
+        <Button size="sm" variant="outline" className="h-8 text-footnote" onClick={() => { localStorage.removeItem('tm_dirs'); toast.success(t('toast.updated')) }}>
           {t('session.clear')}
         </Button>
       </Row>
@@ -452,22 +612,22 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               <Row label={t('session.downloadDir')}>
                 <DirInput field="downloadDir" />
               </Row>
-              <Row label={t('session.startAdded')}>
+              <Row label={t('session.startAdded')} hint={t('session.startAddedHint')}>
                 <Switch checked={session.startAdded} onCheckedChange={(v) => patchSession({ startAdded: v })} />
               </Row>
-              <Row label={t('session.incompleteDirEnabled')}>
+              <Row label={t('session.incompleteDirEnabled')} hint={t('session.incompleteDirEnabledHint')}>
                 <Switch checked={session.incompleteDirEnabled} onCheckedChange={(v) => patchSession({ incompleteDirEnabled: v })} />
               </Row>
               <Row label={t('session.incompleteDir')}>
                 <DirInput field="incompleteDir" />
               </Row>
-              <Row label={t('session.renamePartialFiles')}>
+              <Row label={t('session.renamePartialFiles')} hint={t('session.renamePartialFilesHint')}>
                 <Switch checked={session.renamePartialFiles} onCheckedChange={(v) => patchSession({ renamePartialFiles: v })} />
               </Row>
-              <Row label={t('session.trashOriginalTorrentFiles')}>
+              <Row label={t('session.trashOriginalTorrentFiles')} hint={t('session.trashOriginalTorrentFilesHint')}>
                 <Switch checked={session.trashOriginalTorrentFiles} onCheckedChange={(v) => patchSession({ trashOriginalTorrentFiles: v })} />
               </Row>
-              <Row label={t('session.cacheSizeMB')}>
+              <Row label={t('session.cacheSizeMB')} hint={t('session.cacheSizeMBHint')}>
                 <NumInput value={session.cacheSizeMB} min={0} onChange={(v) => v != null && patchSession({ cacheSizeMB: v })} />
               </Row>
             </div>
@@ -478,10 +638,10 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           title: t('session.seeding'),
           children: (
             <div className="space-y-1">
-              <Row label={t('session.seedRatioLimit')}>
+              <Row label={t('session.seedRatioLimit')} hint={t('session.seedRatioLimitHint')}>
                 <NumInput value={session.seedRatioLimit} min={0} step={0.5} onChange={(v) => v != null && patchSession({ seedRatioLimit: v })} />
               </Row>
-              <Row label={t('session.idleSeedingLimit')}>
+              <Row label={t('session.idleSeedingLimit')} hint={t('session.idleSeedingLimitHint')}>
                 <div className="flex items-center gap-2">
                   <Switch checked={session.idleSeedingLimitEnabled} onCheckedChange={(v) => patchSession({ idleSeedingLimitEnabled: v })} />
                   <NumInput value={session.idleSeedingLimit} min={0} disabled={!session.idleSeedingLimitEnabled} onChange={(v) => v != null && patchSession({ idleSeedingLimit: v })} />
@@ -495,22 +655,22 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           title: t('session.queue'),
           children: (
             <div className="space-y-1">
-              <Row label={t('session.downloadQueueEnabled')}>
+              <Row label={t('session.downloadQueueEnabled')} hint={t('session.downloadQueueEnabledHint')}>
                 <Switch checked={session.downloadQueueEnabled} onCheckedChange={(v) => patchSession({ downloadQueueEnabled: v })} />
               </Row>
-              <Row label={t('session.downloadQueueSize')}>
+              <Row label={t('session.downloadQueueSize')} hint={t('session.downloadQueueSizeHint')}>
                 <NumInput value={session.downloadQueueSize} min={0} disabled={!session.downloadQueueEnabled} onChange={(v) => v != null && patchSession({ downloadQueueSize: v })} />
               </Row>
-              <Row label={t('session.seedQueueEnabled')}>
+              <Row label={t('session.seedQueueEnabled')} hint={t('session.seedQueueEnabledHint')}>
                 <Switch checked={session.seedQueueEnabled} onCheckedChange={(v) => patchSession({ seedQueueEnabled: v })} />
               </Row>
-              <Row label={t('session.seedQueueSize')}>
+              <Row label={t('session.seedQueueSize')} hint={t('session.seedQueueSizeHint')}>
                 <NumInput value={session.seedQueueSize} min={0} disabled={!session.seedQueueEnabled} onChange={(v) => v != null && patchSession({ seedQueueSize: v })} />
               </Row>
-              <Row label={t('session.queueStalledEnabled')}>
+              <Row label={t('session.queueStalledEnabled')} hint={t('session.queueStalledEnabledHint')}>
                 <Switch checked={session.queueStalledEnabled} onCheckedChange={(v) => patchSession({ queueStalledEnabled: v })} />
               </Row>
-              <Row label={t('session.queueStalledMinutes')}>
+              <Row label={t('session.queueStalledMinutes')} hint={t('session.queueStalledMinutesHint')}>
                 <NumInput value={session.queueStalledMinutes} min={0} onChange={(v) => v != null && patchSession({ queueStalledMinutes: v })} />
               </Row>
             </div>
@@ -521,33 +681,36 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           title: t('session.bandwidth'),
           children: (
             <div className="space-y-1">
-              <Row label={t('session.speedLimitDown')}>
+              <Row label={t('session.speedLimitDown')} hint={t('session.speedLimitDownHint')}>
                 <div className="flex items-center gap-2">
                   <Switch checked={session.speedLimitDownOn} onCheckedChange={(v) => patchSession({ speedLimitDownOn: v })} />
                   <NumInput value={session.speedLimitDown} min={0} disabled={!session.speedLimitDownOn} onChange={(v) => v != null && patchSession({ speedLimitDown: v })} />
                 </div>
               </Row>
-              <Row label={t('session.speedLimitUp')}>
+              <Row label={t('session.speedLimitUp')} hint={t('session.speedLimitUpHint')}>
                 <div className="flex items-center gap-2">
                   <Switch checked={session.speedLimitUpOn} onCheckedChange={(v) => patchSession({ speedLimitUpOn: v })} />
                   <NumInput value={session.speedLimitUp} min={0} disabled={!session.speedLimitUpOn} onChange={(v) => v != null && patchSession({ speedLimitUp: v })} />
                 </div>
               </Row>
               <div className="text-caption1 text-gray-400 pt-1">{t('session.altSpeed')}</div>
-              <Row label={t('session.altSpeedDown')}>
+              <Row label={t('session.altSpeedDown')} hint={t('session.altSpeedDownHint')}>
                 <NumInput value={session.altSpeedDown} min={0} onChange={(v) => v != null && patchSession({ altSpeedDown: v })} />
               </Row>
-              <Row label={t('session.altSpeedUp')}>
+              <Row label={t('session.altSpeedUp')} hint={t('session.altSpeedUpHint')}>
                 <NumInput value={session.altSpeedUp} min={0} onChange={(v) => v != null && patchSession({ altSpeedUp: v })} />
               </Row>
-              <Row label={t('session.altSpeedTime')}>
+              <Row label={t('session.altSpeedTime')} hint={t('session.altSpeedTimeHint')}>
                 <Switch checked={session.altSpeedTimeEnabled} onCheckedChange={(v) => patchSession({ altSpeedTimeEnabled: v })} />
               </Row>
               {/* 周几多选（0=每天，其余为位掩码） */}
               <div className="flex items-center justify-between gap-3 py-1.5">
-                <span className="text-body text-gray-600 dark:text-gray-300">{t('session.scheduleDays')}</span>
+                <div className="min-w-0">
+                  <span className="text-body text-gray-600 dark:text-gray-300">{t('session.scheduleDays')}</span>
+                  <p className="text-caption1 text-gray-400 mt-0.5">{t('session.scheduleDaysHint')}</p>
+                </div>
                 <div className="flex gap-1">
-                  {DAY_BITS.map((d, i) => {
+                  {DAY_BITS.map((d) => {
                     const cur = session.altSpeedTimeDay
                     // 0（每天）在 UI 上等价于七天全选
                     const active = (cur === 0 ? DAY_ALL : cur) & d.bit ? true : false
@@ -564,19 +727,19 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                           patchSession({ altSpeedTimeDay: next === DAY_ALL ? 0 : next })
                         }}
                         className={cn(
-                          'h-7 w-7 text-caption1 rounded-md border transition-colors',
+                          'h-8 w-8 text-caption1 rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                           active
                             ? 'bg-primary text-primary-foreground border-primary'
                             : 'border-gray-200 dark:border-gray-700 text-gray-500 hover:border-gray-300',
                         )}
                       >
-                        {['一', '二', '三', '四', '五', '六', '日'][i]}
+                        {t(`session.dayShort${d.label}`)}
                       </button>
                     )
                   })}
                 </div>
               </div>
-              <Row label={t('session.scheduleTime')}>
+              <Row label={t('session.scheduleTime')} hint={t('session.scheduleTimeHint')}>
                 <div className="flex items-center gap-1.5">
                   <SmallSelect
                     value={timeToStr(session.altSpeedTimeBegin)}
@@ -601,17 +764,17 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           title: t('session.network'),
           children: (
             <div className="space-y-1">
-              <Row label={t('session.peerPort')}>
+              <Row label={t('session.peerPort')} hint={t('session.peerPortHint')}>
                 <NumInput value={session.peerPort} min={1} max={65535} disabled={session.peerPortRandomOnStart} onChange={(v) => v != null && patchSession({ peerPort: v })} />
               </Row>
-              <Row label={t('session.peerPortRandomOnStart')}>
+              <Row label={t('session.peerPortRandomOnStart')} hint={t('session.peerPortRandomOnStartHint')}>
                 <Switch checked={session.peerPortRandomOnStart} onCheckedChange={(v) => patchSession({ peerPortRandomOnStart: v })} />
               </Row>
               <Row label={t('session.upnp')}>
                 <Switch checked={session.portForwardingEnabled} onCheckedChange={(v) => patchSession({ portForwardingEnabled: v })} />
               </Row>
               <p className="text-footnote text-gray-400 -mt-0.5 mb-1">{t('session.upnpHint')}</p>
-              <Row label={t('session.encryption')}>
+              <Row label={t('session.encryption')} hint={t('session.encryptionHint')}>
                 <SmallSelect
                   value={session.encryption || 'preferred'}
                   onValueChange={(v) => patchSession({ encryption: v })}
@@ -622,7 +785,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   ]}
                 />
               </Row>
-              <Row label={t('session.peerLimitGlobal')}>
+              <Row label={t('session.peerLimitGlobal')} hint={t('session.peerLimitGlobalHint')}>
                 <NumInput value={session.peerLimitGlobal} min={0} onChange={(v) => v != null && patchSession({ peerLimitGlobal: v })} />
               </Row>
               <div className="py-1">
@@ -661,7 +824,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           title: t('session.other'),
           children: (
             <div className="space-y-1">
-              <Row label={t('session.blocklistEnabled')}>
+              <Row label={t('session.blocklistEnabled')} hint={t('session.blocklistEnabledHint')}>
                 <Switch checked={blocklistEnabled} onCheckedChange={(v) => { setBlocklistEnabled(v); void patchSession({ blocklistEnabled: v }) }} />
               </Row>
               <Row label={t('session.blocklistSize')}>
@@ -669,24 +832,24 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </Row>
               <div className="flex items-center gap-2 py-1.5">
                 <Input value={blocklistUrl} onChange={(e) => setBlocklistUrl(e.target.value)} placeholder={t('session.blocklistUrl')} className="h-8 text-footnote flex-1" />
-                <Button size="sm" className="h-7 text-footnote shrink-0" disabled={blocklistUpdating} onClick={updateBlocklist}>
+                <Button size="sm" className="h-8 text-footnote shrink-0" disabled={blocklistUpdating} onClick={updateBlocklist}>
                   {blocklistUpdating ? t('common.loading') : t('session.blocklistUpdate')}
                 </Button>
               </div>
               <div className="pt-2 mt-1 border-t border-gray-100 dark:border-gray-700 space-y-1">
-                <Row label={t('session.scriptAdded')}>
+                <Row label={t('session.scriptAdded')} hint={t('session.scriptAddedHint')}>
                   <Switch checked={session.scriptTorrentAddedEnabled} onCheckedChange={(v) => patchSession({ scriptTorrentAddedEnabled: v })} />
                 </Row>
                 <Input defaultValue={session.scriptTorrentAddedFilename} placeholder={t('session.scriptHint')} className="h-8 text-footnote" onBlur={(e) => patchSession({ scriptTorrentAddedFilename: e.target.value })} />
               </div>
               <div className="space-y-1">
-                <Row label={t('session.scriptDone')}>
+                <Row label={t('session.scriptDone')} hint={t('session.scriptDoneHint')}>
                   <Switch checked={session.scriptTorrentDoneEnabled} onCheckedChange={(v) => patchSession({ scriptTorrentDoneEnabled: v })} />
                 </Row>
                 <Input defaultValue={session.scriptTorrentDoneFilename} placeholder={t('session.scriptHint')} className="h-8 text-footnote" onBlur={(e) => patchSession({ scriptTorrentDoneFilename: e.target.value })} />
               </div>
               <div className="space-y-1">
-                <Row label={t('session.scriptDoneSeeding')}>
+                <Row label={t('session.scriptDoneSeeding')} hint={t('session.scriptDoneSeedingHint')}>
                   <Switch checked={session.scriptTorrentDoneSeedingEnabled} onCheckedChange={(v) => patchSession({ scriptTorrentDoneSeedingEnabled: v })} />
                 </Row>
                 <Input defaultValue={session.scriptTorrentDoneSeedingFilename} placeholder={t('session.scriptHint')} className="h-8 text-footnote" onBlur={(e) => patchSession({ scriptTorrentDoneSeedingFilename: e.target.value })} />
@@ -709,7 +872,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-[540px]">
+      <DialogContent className="sm:max-w-[540px]">
         <DialogHeader>
           <DialogTitle>{t('session.title')}</DialogTitle>
         </DialogHeader>
@@ -750,7 +913,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                     placeholder={t('session.multiServer.serverName')}
                   />
                   <Switch checked={server.enabled} onCheckedChange={(v) => { const s = [...servers]; s[idx] = { ...s[idx], enabled: v }; void saveServers(s) }} />
-                  <Button size="sm" variant="destructive" className="h-7 text-footnote shrink-0" onClick={() => void removeServer(idx)}>
+                  <Button size="sm" variant="destructive" className="h-8 text-footnote shrink-0" onClick={() => void removeServer(idx)}>
                     {t('common.delete')}
                   </Button>
                 </div>
@@ -795,7 +958,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                       onClick={() => void switchToServer(idx)}
                       disabled={!server.enabled}
                     >
-                      {server.name || `Server ${idx + 1}`} - {server.url}
+                      {server.name || `${t('session.multiServer.server')} ${idx + 1}`} - {server.url}
                     </Button>
                   ))}
                 </div>
@@ -815,10 +978,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             </div>
           </Section>
 
-          {/* 关于 */}
-          <div className="pt-3 mt-3 border-t border-gray-100 dark:border-gray-700 text-footnote text-gray-400">
-            {t('session.about')}: Transmission WebUI for fnOS v1.0.0{status?.version ? ` · Transmission ${status.version}` : ''}
-          </div>
+          {/* 关于与检查更新 */}
+          <AboutSection transmissionVersion={status?.version} />
         </div>
 
         <DialogFooter>

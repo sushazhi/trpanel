@@ -122,7 +122,7 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="glass-panel-strong sm:max-w-[520px]">
+      <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle>{t('createTorrent.title')}</DialogTitle>
         </DialogHeader>
@@ -181,12 +181,12 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
                   </Button>
                 </div>
               ))}
-              {sources.length > 50 && <div className="text-footnote text-gray-400">… {sources.length - 50} more</div>}
+              {sources.length > 50 && <div className="text-footnote text-gray-400">{t('createTorrent.moreFiles', { count: sources.length - 50 })}</div>}
             </div>
           )}
           {sources.length > 0 && (
             <div className="text-footnote text-gray-500">
-              {sources.length} files · {formatBytes(totalSize)}
+              {t('createTorrent.fileSummary', { count: sources.length, size: formatBytes(totalSize) })}
             </div>
           )}
 
@@ -218,8 +218,8 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
               <SelectTrigger className="h-8 w-40 text-footnote">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="glass-panel-strong">
-                <SelectItem value="auto">Auto ({formatBytes(pieceLength)})</SelectItem>
+              <SelectContent className="glass-panel-solid">
+                <SelectItem value="auto">{t('createTorrent.autoPiece')} ({formatBytes(pieceLength)})</SelectItem>
                 {[16, 32, 64, 128, 256, 512].map((k) => (
                   <SelectItem key={k} value={`${k}k`}>{k} KB</SelectItem>
                 ))}

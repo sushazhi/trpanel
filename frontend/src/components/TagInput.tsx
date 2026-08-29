@@ -67,7 +67,7 @@ export function TagInput({
         onBlur={() => { commit(text); setFocused(false) }}
         onFocus={() => setFocused(true)}
         placeholder={value.length === 0 ? placeholder : ''}
-        className="flex-1 min-w-24 h-7 border-0 bg-transparent px-1 text-body shadow-none focus-visible:ring-0 focus-visible:outline-none"
+        className="flex-1 min-w-24 h-8 border-0 bg-transparent px-1 text-body shadow-none focus-visible:ring-0 focus-visible:outline-none"
       />
       {shownSuggestions.length > 0 && (
         <div className="absolute left-0 right-0 top-full mt-1 z-20 rounded-md border border-input bg-popover shadow-lg overflow-hidden">

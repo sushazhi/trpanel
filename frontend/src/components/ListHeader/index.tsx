@@ -89,7 +89,7 @@ export function ListControls({ compact, isMobile, onOpenDashboard }: { compact?:
           ) : (
             <button
               className={cn(
-                'h-7 px-2.5 rounded-lg text-footnote flex items-center gap-1.5 transition-colors',
+                'h-8 px-2.5 rounded-lg text-footnote flex items-center gap-1.5 transition-colors',
                 sortField !== 'name'
                   ? 'text-primary bg-primary/10'
                   : 'text-gray-500 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-white/10',
@@ -134,7 +134,7 @@ export function ListControls({ compact, isMobile, onOpenDashboard }: { compact?:
         <button
           onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')}
           className={cn(
-            compact ? 'h-9 w-9 rounded-full' : 'h-7 w-7 rounded-lg',
+            compact ? 'h-9 w-9 rounded-full' : 'h-8 w-8 rounded-lg',
             'flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-primary hover:bg-white/60 dark:hover:bg-white/10 transition-colors',
           )}
           title={viewMode === 'grid' ? t('dashboard.viewTable') : t('dashboard.viewGrid')}
@@ -147,7 +147,7 @@ export function ListControls({ compact, isMobile, onOpenDashboard }: { compact?:
       <button
         onClick={() => void refresh()}
         className={cn(
-          compact ? 'h-9 w-9 rounded-full' : 'h-7 w-7 rounded-lg',
+          compact ? 'h-9 w-9 rounded-full' : 'h-8 w-8 rounded-lg',
           'flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-primary hover:bg-white/60 dark:hover:bg-white/10 transition-colors',
         )}
         title={t('common.refresh')}
@@ -160,7 +160,7 @@ export function ListControls({ compact, isMobile, onOpenDashboard }: { compact?:
         <button
           onClick={onOpenDashboard}
           className={cn(
-            compact ? 'h-9 w-9 rounded-full' : 'h-7 w-7 rounded-lg',
+            compact ? 'h-9 w-9 rounded-full' : 'h-8 w-8 rounded-lg',
             'flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-primary hover:bg-white/60 dark:hover:bg-white/10 transition-colors',
           )}
           title={t('dashboard.title')}
@@ -180,7 +180,7 @@ export function ListHeader({ count, isMobile, onOpenDashboard }: { count: number
   const titleKey = STATUS_LABEL[activeStatus] ?? 'nav.all'
 
   return (
-    <div className="shrink-0 glass-panel-strong rounded-2xl h-11 px-4 flex items-center gap-3">
+    <div className="tm-dock glass-panel rounded-dock h-11 px-4 flex items-center gap-3">
       {/* 标题 + 计数 */}
       <div className="flex items-baseline gap-2 min-w-0">
         <span className="text-subhead font-semibold text-gray-800 dark:text-gray-100 truncate">{t(titleKey)}</span>
