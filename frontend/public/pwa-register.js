@@ -1,8 +1,11 @@
 // PWA Service Worker 注册
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
+    // 按脚本自身 URL 解析：部署在宿主网关子路径（/app/transmission/）下时
+    // 写死 '/sw.js' 会落到站点根而 404，手机端安装与离线缓存整体失效
+    const here = new URL('.', (document.currentScript && document.currentScript.src) || window.location.href)
     navigator.serviceWorker
-      .register('/sw.js')
+      .register(new URL('sw.js', here).href)
       .then((registration) => {
         console.log('[PWA] SW registered:', registration.scope)
         // 监听更新

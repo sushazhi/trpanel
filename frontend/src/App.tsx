@@ -3,8 +3,9 @@ import { Plus, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { torrentApi, sessionApi } from '@/api/torrent'
 import { AddTorrent } from '@/components/AddTorrent'
+import { AuthTokenDialog } from '@/components/AuthTokenDialog'
 import { Dashboard } from '@/components/Dashboard'
-import { DesktopSidebar, MobileDrawer } from '@/components/Sidebar'
+import { DesktopSidebar, MobileDrawer, STATUS_ITEMS } from '@/components/Sidebar'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { SettingsModal } from '@/components/SettingsModal'
 import { StatusBar } from '@/components/StatusBar'
@@ -29,7 +30,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmHost } from '@/lib/confirm'
 import { ThemeColors } from '@/lib/theme'
-import { cn } from '@/lib/utils'
+import { cn, cssVars } from '@/lib/utils'
 import { Toaster } from 'sonner'
 import '@/i18n'
 
@@ -37,6 +38,9 @@ import '@/i18n'
 const SYS_TRANSPARENCY = '(prefers-reduced-transparency: reduce)'
 const SYS_MOTION = '(prefers-reduced-motion: reduce)'
 const SYS_CONTRAST = '(prefers-contrast: more)'
+
+// 滑动切分类只属于列表区：顶栏搜索框里横向选字、抽屉里的下滑都不该被当成切分类
+const SWIPE_CHROME = '.tm-dock-top, .tm-dock-bottom, [role="dialog"], [role="menu"], .tm-ctx'
 
 export default function App() {
   const { t, i18n } = useTranslation()
@@ -60,6 +64,7 @@ export default function App() {
   const sortField = useAppStore((s) => s.sortField)
   const sortOrder = useAppStore((s) => s.sortOrder)
   const sidebarWidth = useAppStore((s) => s.sidebarWidth)
+  const statusFilterVisible = useAppStore((s) => s.statusFilterVisible)
   const reduceGlass = useAppStore((s) => s.reduceGlass)
   const reduceMotion = useAppStore((s) => s.reduceMotion)
   const moreContrast = useAppStore((s) => s.moreContrast)
@@ -100,36 +105,33 @@ export default function App() {
     },
   })
 
-  // 移动端左右滑动切换分类
-  const statusOrder = ['all', 'active', 'downloading', 'seeding', 'waiting-seed', 'completed', 'paused', 'verifying', 'error']
+  // 移动端左右滑动切换分类：顺序与显隐都复用侧栏列表，滑得到的分类必然点得到
+  const statusOrder = useMemo(
+    () =>
+      STATUS_ITEMS.filter((item) => item.key === 'all' || statusFilterVisible[item.key] !== false).map(
+        (item) => item.key,
+      ),
+    [statusFilterVisible],
+  )
   const swipeRef = useRef(filters.status[0] || 'all')
   useEffect(() => {
     swipeRef.current = filters.status[0] || 'all'
   }, [filters.status])
+
+  const stepStatus = async (delta: number) => {
+    const at = statusOrder.indexOf(swipeRef.current)
+    // 当前分类已不在列表中（如遗留的 'active'、或刚被隐藏的分组）时从左端重新起步
+    const next = statusOrder[(at < 0 ? 0 : at) + delta]
+    if (!next) return
+    await sessionApi.get().catch(() => {})
+    useAppStore.getState().setFilters({ status: [next] })
+  }
+
   useSwipeGesture({
     threshold: 80,
-    onSwipeLeft: () => {
-      const cur = swipeRef.current
-      const idx = statusOrder.indexOf(cur)
-      if (idx >= 0 && idx < statusOrder.length - 1) {
-        const next = statusOrder[idx + 1]
-        void (async () => {
-          await sessionApi.get().catch(() => {})
-          useAppStore.getState().setFilters({ ...useAppStore.getState().filters, status: [next] })
-        })()
-      }
-    },
-    onSwipeRight: () => {
-      const cur = swipeRef.current
-      const idx = statusOrder.indexOf(cur)
-      if (idx > 0) {
-        const prev = statusOrder[idx - 1]
-        void (async () => {
-          await sessionApi.get().catch(() => {})
-          useAppStore.getState().setFilters({ ...useAppStore.getState().filters, status: [prev] })
-        })()
-      }
-    },
+    ignoreSelector: SWIPE_CHROME,
+    onSwipeLeft: () => void stepStatus(1),
+    onSwipeRight: () => void stepStatus(-1),
   })
 
   const filtered = useFilter(torrents, filters, torrentSites, sortField, sortOrder)
@@ -375,6 +377,7 @@ export default function App() {
       <TorrentDetail torrent={detailTorrent} onClose={() => setDetailTorrent(null)} onOpenChange={(open) => { if (!open) setDetailTorrent(null) }} isMobile={isMobile} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <PwaUpdatePrompt />
+      <AuthTokenDialog />
       <ConfirmHost />
       {/* 系统 chrome 颜色跟随品牌预设，否则 PWA 下顶栏色带断层会破坏玻璃延伸感 */}
       <ThemeColors />
@@ -427,9 +430,19 @@ export default function App() {
           {batchLabels.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">
               {batchLabels.map((label, idx) => (
-                <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-footnote bg-primary/10 text-primary">
+                <span
+                  key={idx}
+                  className="tm-chip inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-footnote"
+                  style={cssVars({ '--chip': 'var(--hue-purple)' })}
+                >
                   {label}
-                  <button onClick={() => setBatchLabels((prev) => prev.filter((_, i) => i !== idx))} className="ml-0.5 hover:text-red-500">×</button>
+                  <button
+                    onClick={() => setBatchLabels((prev) => prev.filter((_, i) => i !== idx))}
+                    aria-label={`${t('common.remove')} ${label}`}
+                    className="tm-hug ml-0.5 hover:text-red-500"
+                  >
+                    ×
+                  </button>
                 </span>
               ))}
             </div>

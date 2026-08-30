@@ -50,6 +50,9 @@ export function useGlassChrome({ shell, top, bottoms }: Options) {
     ro.observe(shellEl)
     dockEls.forEach((node) => ro.observe(node))
     window.addEventListener('resize', measure)
+    // 软键盘与地址栏收展在 iOS 上只体现在 visualViewport，不补这个监听避让量会停在旧值
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', measure)
     measure()
 
     // scroll 不冒泡但会经过捕获阶段，挂在 shell 上即可覆盖全部后代滚动区
@@ -73,6 +76,7 @@ export function useGlassChrome({ shell, top, bottoms }: Options) {
     return () => {
       ro.disconnect()
       window.removeEventListener('resize', measure)
+      vv?.removeEventListener('resize', measure)
       shellEl.removeEventListener('scroll', onScroll, true)
       if (frame) cancelAnimationFrame(frame)
     }

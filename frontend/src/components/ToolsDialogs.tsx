@@ -15,9 +15,11 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { statusColor, statusLabelKey } from '@/utils/status'
+import { cssVars } from '@/lib/utils'
 
 // 批量替换 Tracker（参考应用语义：搜索旧地址 → 匹配种子列表+数量 → 替换为 → 逐个执行）
-const RT_STATUS_COLORS = ['#9ca3af', '#f59e0b', '#f59e0b', '#22c55e', '#22c55e', '#3b82f6', '#3b82f6', '#ef4444']
+// 状态色统一取自 utils/status，这里不再抄一份色表
 
 export function ReplaceTrackerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation()
@@ -119,10 +121,10 @@ export function ReplaceTrackerDialog({ open, onClose }: { open: boolean; onClose
                   {matched.map((tor) => (
                     <div key={tor.id} className="flex items-center gap-2 min-w-0 text-footnote">
                       <span
-                        className="shrink-0 px-1.5 py-px rounded-full text-caption2"
-                        style={{ backgroundColor: `${RT_STATUS_COLORS[tor.status] ?? '#9ca3af'}1a`, color: RT_STATUS_COLORS[tor.status] ?? '#9ca3af' }}
+                        className="tm-chip shrink-0 px-1.5 py-px rounded-full border text-caption2"
+                        style={cssVars({ '--chip': statusColor(tor) })}
                       >
-                        {t(`status.${tor.status}`)}
+                        {t(statusLabelKey(tor))}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-gray-600 dark:text-gray-300" title={tor.name}>{tor.name}</span>
                     </div>

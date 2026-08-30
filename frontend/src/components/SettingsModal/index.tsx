@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Children, cloneElement, isValidElement, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, FolderOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { client, request } from '@/api/client'
@@ -54,14 +54,25 @@ const timeToStr = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '
 const strToMin = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 60 + (m || 0) }
 
 // ========== 设置行 ==========
+// 标题与控件之间没有可见的 <label for> 关系，这里由 Row 统一给行内控件补 aria-label。
+// 不用 aria-labelledby 指向标题容器：那会把 hint 提示文字一起算进名称，
+// 而且目录/滑块这类一行多控件的行根本无法与单个控件建立关联。
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  const labelled = Children.map(children, (child) => {
+    if (!isValidElement<{ 'aria-label'?: string; 'aria-labelledby'?: string }>(child)) return child
+    const type = child.type
+    // 纯容器不具名：aria-label 挂在没有角色的节点上只是噪声
+    if (typeof type === 'string' && ['div', 'span', 'p', 'svg'].includes(type)) return child
+    if (child.props['aria-label'] || child.props['aria-labelledby']) return child
+    return cloneElement(child, { 'aria-label': label })
+  })
   return (
     <div className="flex items-center justify-between gap-3 py-1.5">
       <div className="min-w-0">
         <span className="text-body text-gray-600 dark:text-gray-300">{label}</span>
         {hint && <p className="text-caption1 text-gray-400 mt-0.5">{hint}</p>}
       </div>
-      {children}
+      {labelled}
     </div>
   )
 }
@@ -74,10 +85,11 @@ interface NumInputProps {
   step?: number
   disabled?: boolean
   className?: string
+  'aria-label'?: string
   onChange?: (v?: number) => void
 }
 
-function NumInput({ value, min, max, step, disabled, className, onChange }: NumInputProps) {
+function NumInput({ value, min, max, step, disabled, className, onChange, ...rest }: NumInputProps) {
   return (
     <Input
       type="number"
@@ -93,6 +105,7 @@ function NumInput({ value, min, max, step, disabled, className, onChange }: NumI
         const n = Number(raw)
         if (!Number.isNaN(n)) onChange?.(n)
       }}
+      {...rest}
     />
   )
 }
@@ -100,7 +113,7 @@ function NumInput({ value, min, max, step, disabled, className, onChange }: NumI
 // ========== 路径输入框 ==========
 // 受控于本地 state，仅在失焦/回车且内容变化时提交一次，
 // 避免目录类字段每敲一个字符就发一次 PUT /session（请求洪水 + 输入跳动）
-function DirInput({ field }: { field: 'downloadDir' | 'incompleteDir' }) {
+function DirInput({ field, 'aria-label': ariaLabel }: { field: 'downloadDir' | 'incompleteDir'; 'aria-label'?: string }) {
   const session = useAppStore((s) => s.session)
   const setSession = useAppStore((s) => s.setSession)
   const { t } = useTranslation()
@@ -138,6 +151,7 @@ function DirInput({ field }: { field: 'downloadDir' | 'incompleteDir' }) {
   return (
     <div className="flex items-center gap-1.5 w-1/2">
       <Input
+        aria-label={ariaLabel}
         value={draft}
         onFocus={() => setEditing(true)}
         onChange={(e) => setDraft(e.target.value)}
@@ -212,12 +226,13 @@ interface LabeledSelectProps {
   onValueChange: (v: string) => void
   options: { value: string; label: string }[]
   className?: string
+  'aria-label'?: string
 }
 
-function SmallSelect({ value, onValueChange, options, className }: LabeledSelectProps) {
+function SmallSelect({ value, onValueChange, options, className, 'aria-label': ariaLabel }: LabeledSelectProps) {
   return (
     <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger className={cn('h-8 w-24 text-footnote', className)}>
+      <SelectTrigger aria-label={ariaLabel} className={cn('h-8 w-24 text-footnote', className)}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="glass-panel-solid">
@@ -876,6 +891,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 <span className="text-body text-gray-600 dark:text-gray-300">{t('session.defaultTrackers')}</span>
                 <textarea
                   rows={3}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   defaultValue={session.defaultTrackers?.join('\n')}
                   placeholder={t('common.eachLineOne')}
                   className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-body shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -895,7 +913,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           <DialogTitle>{t('session.title')}</DialogTitle>
         </DialogHeader>
 
-        <div className="overflow-y-auto max-h-[70vh] space-y-3 pr-1">
+        <div className="overflow-y-auto max-h-[70dvh] space-y-3 pr-1">
           {/* 连接状态 */}
           <div className="flex items-center gap-2 mb-1">
             <span className="text-body">{t('session.connectionStatus')}:</span>

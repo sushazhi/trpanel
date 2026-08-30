@@ -189,7 +189,8 @@ export const useAppStore = create<AppState>()(
       setColumnWidth: (key, width) =>
         set((state) => ({
           columns: state.columns.map((c) =>
-            c.key === key ? { ...c, width: Math.max(60, Math.round(width)) } : c,
+            // 上限同样要钳住：只 clamp 下限的话，一甩鼠标就能把单列拉出整个视口
+            c.key === key ? { ...c, width: Math.min(900, Math.max(60, Math.round(width))) } : c,
           ),
         })),
       setColumns: (cols) => set({ columns: cols }),

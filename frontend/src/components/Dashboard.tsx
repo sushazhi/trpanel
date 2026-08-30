@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-const STATUS_COLORS = ['#9ca3af', '#f59e0b', '#f59e0b', '#22c55e', '#22c55e', '#3b82f6', '#3b82f6', '#ef4444']
+import { statusMeta } from '@/utils/status'
 
 // 统计仪表盘：全局概览 + 状态分布 + 速度历史 + 标签/站点流量
 export function Dashboard({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -59,7 +59,7 @@ export function Dashboard({ open, onClose }: { open: boolean; onClose: () => voi
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-3xl h-[90vh] sm:h-auto sm:max-h-[85vh] flex flex-col p-0">
+      <DialogContent className="sm:max-w-3xl h-[90dvh] sm:h-auto sm:max-h-[85dvh] flex flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
           <DialogTitle>{t('dashboard.title')}</DialogTitle>
         </DialogHeader>
@@ -136,8 +136,8 @@ function StatusDonut({ byStatus }: { byStatus: Record<number, number> }) {
             <circle
               key={e.status}
               cx="50" cy="50" r={R} fill="none"
-              stroke={STATUS_COLORS[e.status] ?? '#888'}
               strokeWidth="12"
+              style={{ stroke: statusMeta(e.status).color }}
               strokeDasharray={`${len} ${CIRC - len}`}
               strokeDashoffset={-offset}
               strokeLinecap="butt"
@@ -153,7 +153,7 @@ function StatusDonut({ byStatus }: { byStatus: Record<number, number> }) {
       <div className="flex-1 space-y-1 min-w-0">
         {entries.slice(0, 6).map((e) => (
           <div key={e.status} className="flex items-center gap-2 text-footnote">
-            <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: STATUS_COLORS[e.status] ?? '#888' }} />
+            <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: statusMeta(e.status).color }} />
             <span className="flex-1 truncate">{t(`status.${e.status}`)}</span>
             <span className="text-gray-500">{e.count}</span>
           </div>

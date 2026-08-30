@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { CheckCircle, Clock, CloudDownload, Download, HardDrive, PauseCircle, RotateCcw, ShieldAlert, Upload, XCircle } from 'lucide-react'
+import { HardDrive } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { sessionApi } from '@/api/torrent'
+import { STATUS_META } from '@/utils/status'
 import { useAppStore } from '@/stores/appStore'
 import { usePlatform } from '@/platform'
 import { cn } from '@/lib/utils'
@@ -14,17 +15,7 @@ interface Props {
   isMobile?: boolean
 }
 
-// Transmission 状态码 → 图标/颜色（0 停止 / 1-2 校验 / 3 排队下载 / 4 下载 / 5 排队做种 / 6 做种 / 7 隔离）
-const STATUS_CONFIG: Record<number, { icon: React.ElementType; color: string; label: string }> = {
-  0: { icon: PauseCircle, color: '#8e8e93', label: 'status.0' },
-  1: { icon: RotateCcw, color: '#ff9500', label: 'status.1' },
-  2: { icon: RotateCcw, color: '#ff9500', label: 'status.2' },
-  3: { icon: CloudDownload, color: '#007aff', label: 'status.3' },
-  4: { icon: Download, color: '#007aff', label: 'status.4' },
-  5: { icon: Clock, color: '#8b5cf6', label: 'status.5' },
-  6: { icon: Upload, color: '#34c759', label: 'status.6' },
-  7: { icon: ShieldAlert, color: '#ff9500', label: 'status.7' },
-}
+// 状态码 → 图标/颜色/文案统一取自 utils/status，这里不再维护副本
 
 // 图一状态栏：已连接 · PPC 免密认证 · 本次会话 ↓/↑ 流量
 export const StatusBar: React.FC<Props> = ({ isMobile }) => {
@@ -178,7 +169,7 @@ export const StatusBar: React.FC<Props> = ({ isMobile }) => {
         {/* 统计详情弹窗 */}
         <Popover open={showStats} onOpenChange={setShowStats}>
           <PopoverTrigger asChild>
-            <button className="text-footnote hover:text-primary transition-colors underline decoration-dashed underline-offset-2 shrink-0">
+            <button className="tm-hug px-2 text-footnote hover:text-primary transition-colors underline decoration-dashed underline-offset-2 shrink-0">
               {t('status.details')}
             </button>
           </PopoverTrigger>
@@ -214,7 +205,7 @@ export const StatusBar: React.FC<Props> = ({ isMobile }) => {
               )}
               <div className="border-t border-white/60 dark:border-white/10 pt-2 mt-2">
                 <div className="text-gray-500 mb-1">{t('common.status')}</div>
-                {Object.entries(STATUS_CONFIG).map(([key, cfg]) => {
+                {Object.entries(STATUS_META).map(([key, cfg]) => {
                   const StatusIcon = cfg.icon
                   const count = counts[Number(key)] || 0
                   return (

@@ -23,7 +23,8 @@ import { useTorrentActions } from '@/hooks/useTorrentActions'
 import { useRevealPath } from '@/hooks/useRevealPath'
 import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
-import { cn } from '@/lib/utils'
+import { cn, cssVars } from '@/lib/utils'
+import { tagColor } from '@/utils/tagColor'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -161,13 +162,13 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   }
 
   return (
-    <header className="tm-dock glass-panel rounded-dock px-3 sm:px-4 py-2 select-none">
+    <header className="tm-dock glass-panel rounded-dock px-3 sm:px-4 py-1.5 sm:py-2 select-none">
       <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
         {/* 移动端抽屉按钮 */}
         {isMobile && onOpenDrawer && (
           <button
             onClick={onOpenDrawer}
-            className="h-9 w-9 shrink-0 rounded-full flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/10 transition-colors"
+            className="h-11 w-11 shrink-0 rounded-full flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/10 transition-colors"
             aria-label="menu"
           >
             <Menu className="w-5 h-5" />
@@ -202,10 +203,15 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
             <Input
               id="search-input"
               data-search-input
+              enterKeyHint="search"
+              aria-label={t('topbar.searchAria')}
               value={search}
               onChange={(e) => setFilters({ search: e.target.value })}
               placeholder={t('topbar.searchPlaceholder')}
-              className="h-9 pl-9 pr-3 rounded-full bg-white/60 dark:bg-white/10 border-transparent shadow-inner text-body focus-visible:ring-primary/50"
+              className={cn(
+                isMobile ? 'h-11' : 'h-9',
+                'pl-9 pr-3 rounded-full bg-white/60 dark:bg-white/10 border-transparent shadow-inner text-body focus-visible:ring-primary/50',
+              )}
             />
           </div>
         </div>
@@ -278,8 +284,8 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
           <Popover open={avatarOpen} onOpenChange={setAvatarOpen}>
             <PopoverTrigger asChild>
               <button
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[var(--brand-grad-to)] to-[var(--brand-grad-from)] text-white text-body font-semibold flex items-center justify-center shadow-md hover:scale-105 transition-transform outline-none"
-                aria-label="avatar"
+                className="h-11 w-11 sm:h-10 sm:w-10 rounded-full bg-gradient-to-br from-[var(--brand-grad-to)] to-[var(--brand-grad-from)] text-white text-body font-semibold flex items-center justify-center shadow-md hover:scale-105 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white/70 dark:focus-visible:ring-offset-gray-900"
+                aria-label={t('topbar.quickSettings')}
               >
                 {language === 'zh' ? '中' : 'EN'}
               </button>
@@ -329,14 +335,14 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
 
               <button
                 onClick={() => { setLanguage(language === 'zh' ? 'en' : 'zh'); setAvatarOpen(false) }}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-body text-left hover:bg-white/60 dark:hover:bg-white/10"
+                className="w-full flex items-center gap-2 px-3 py-3 rounded-lg text-body text-left hover:bg-white/60 dark:hover:bg-white/10"
               >
                 <Globe className="w-4 h-4 text-primary" />
                 {language === 'zh' ? 'English' : '中文'}
               </button>
               <button
                 onClick={() => { setAvatarOpen(false); onOpenSettings() }}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-body text-left hover:bg-white/60 dark:hover:bg-white/10"
+                className="w-full flex items-center gap-2 px-3 py-3 rounded-lg text-body text-left hover:bg-white/60 dark:hover:bg-white/10"
               >
                 <Settings className="w-4 h-4 text-gray-500" />
                 {t('common.settings')}
@@ -354,7 +360,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
               key={label}
               label={`#${label}`}
               onRemove={() => setFilters({ labels: filters.labels.filter((l) => l !== label) })}
-              color="#8b5cf6"
+              color={tagColor(label)}
             />
           ))}
           {filters.sites.map((siteId) => (
@@ -362,7 +368,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
               key={siteId}
               label={siteId === '__other__' ? t('site.other') : `#${siteId}`}
               onRemove={() => setFilters({ sites: filters.sites.filter((s) => s !== siteId) })}
-              color="#007aff"
+              color="var(--hue-blue)"
             />
           ))}
           {filters.downloadDirs.map((dir) => (
@@ -370,11 +376,11 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
               key={dir}
               label={dir}
               onRemove={() => setFilters({ downloadDirs: filters.downloadDirs.filter((d) => d !== dir) })}
-              color="#34c759"
+              color="var(--hue-green)"
             />
           ))}
           {filters.search && (
-            <FilterChip label={`"${filters.search}"`} onRemove={() => setFilters({ search: '' })} color="#ff9500" />
+            <FilterChip label={`"${filters.search}"`} onRemove={() => setFilters({ search: '' })} color="var(--hue-orange)" />
           )}
         </div>
       )}
@@ -393,12 +399,21 @@ interface FilterChipProps {
   color: string
 }
 
-const FilterChip: React.FC<FilterChipProps> = ({ label, onRemove, color }) => (
-  <span
-    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-footnote font-medium"
-    style={{ backgroundColor: `${color}18`, color }}
-  >
-    {label}
-    <button onClick={onRemove} className="ml-0.5 opacity-70 hover:opacity-100">×</button>
-  </span>
-)
+const FilterChip: React.FC<FilterChipProps> = ({ label, onRemove, color }) => {
+  const { t } = useTranslation()
+  return (
+    <span
+      className="tm-chip inline-flex items-center gap-1 px-2 py-1 rounded-full border text-footnote font-medium"
+      style={cssVars({ '--chip': color })}
+    >
+      {label}
+      <button
+        onClick={onRemove}
+        aria-label={t('common.remove')}
+        className="tm-hug -mr-1 h-6 w-6 grid place-items-center rounded-full opacity-70 hover:opacity-100"
+      >
+        ×
+      </button>
+    </span>
+  )
+}

@@ -189,10 +189,17 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
     const el = ref.current
     if (!el) return
     const rect = el.getBoundingClientRect()
+    // iOS 键盘弹出时 innerHeight 不变、visualViewport 才反映可见区域
+    const vw = window.visualViewport?.width ?? window.innerWidth
+    const vh = window.visualViewport?.height ?? window.innerHeight
     const M = 8
-    const x = pos.x + rect.width > window.innerWidth - M ? Math.max(M, pos.x - rect.width) : pos.x
-    const y = pos.y + rect.height > window.innerHeight - M ? Math.max(M, pos.y - rect.height) : pos.y
-    setStyle({ left: x, top: y })
+    const flipX = pos.x + rect.width > vw - M ? pos.x - rect.width : pos.x
+    const flipY = pos.y + rect.height > vh - M ? pos.y - rect.height : pos.y
+    // 两侧都做夹取：手机上长按落点常贴着屏幕右缘，只翻转不夹取仍会溢出
+    setStyle({
+      left: Math.min(Math.max(M, flipX), Math.max(M, vw - rect.width - M)),
+      top: Math.min(Math.max(M, flipY), Math.max(M, vh - rect.height - M)),
+    })
   }, [pos])
 
   useEffect(() => {
@@ -202,13 +209,14 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
     const onWheel = (e: WheelEvent | TouchEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose()
     }
-    window.addEventListener('mousedown', close)
+    // pointerdown 同时覆盖鼠标与手指：mousedown 在触屏上迟到，会让菜单关不掉
+    window.addEventListener('pointerdown', close)
     window.addEventListener('wheel', onWheel, { passive: true })
     window.addEventListener('touchmove', onWheel, { passive: true })
     window.addEventListener('keydown', onKey)
     window.addEventListener('blur', close)
     return () => {
-      window.removeEventListener('mousedown', close)
+      window.removeEventListener('pointerdown', close)
       window.removeEventListener('wheel', onWheel)
       window.removeEventListener('touchmove', onWheel)
       window.removeEventListener('keydown', onKey)
@@ -219,8 +227,8 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
   return (
     <div
       ref={ref}
-      onMouseDown={(e) => e.stopPropagation()}
-      className="fixed z-[100] glass-panel-strong min-w-44 max-h-[80vh] overflow-y-auto rounded-xl p-1"
+      onPointerDown={(e) => e.stopPropagation()}
+      className="tm-ctx fixed z-[100] glass-panel-strong min-w-44 max-h-[80dvh] overflow-y-auto overscroll-contain rounded-xl p-1"
       style={style}
     >
       {items.map((item, idx) => {
@@ -368,7 +376,90 @@ function SubMenuPositioned({ pos, children }: { pos: { x: number; y: number }; c
   )
 }
 
-// ========== 种子菜单下拉（桌面右键 / 移动点击） ==========
+// ========== 长按 / 右键锚点 ==========
+// 长按阈值：短于系统的选择/菜单手势，长于误触
+const LONG_PRESS_MS = 500
+// 落点抖动容差：超过即认为用户是在滑动而不是长按
+const LONG_PRESS_SLACK = 10
+
+function ContextMenuAnchor({ items, onClick, children }: {
+  items: MenuItem[]
+  onClick: (key: string) => void
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const timer = useRef<number | null>(null)
+  const start = useRef<{ x: number; y: number } | null>(null)
+  // 原生 contextmenu 与自实现长按在 Android 上会先后到达，用它去重
+  const firedAt = useRef(0)
+
+  const cancel = () => {
+    if (timer.current) {
+      window.clearTimeout(timer.current)
+      timer.current = null
+    }
+    start.current = null
+  }
+  const show = (x: number, y: number) => {
+    firedAt.current = Date.now()
+    setPos({ x, y })
+    setOpen(true)
+  }
+  useEffect(() => cancel, [])
+
+  return (
+    <>
+      <div
+        onContextMenu={(e) => {
+          e.preventDefault()
+          cancel()
+          if (Date.now() - firedAt.current < 800) return
+          show(e.clientX, e.clientY)
+        }}
+        onPointerDown={(e) => {
+          // 鼠标交给 contextmenu 事件，触屏与手写笔才有长按语义
+          if (e.pointerType === 'mouse' || e.button !== 0) return
+          cancel()
+          start.current = { x: e.clientX, y: e.clientY }
+          const { clientX, clientY } = e
+          timer.current = window.setTimeout(() => {
+            timer.current = null
+            start.current = null
+            show(clientX, clientY)
+          }, LONG_PRESS_MS)
+        }}
+        onPointerMove={(e) => {
+          const from = start.current
+          if (!timer.current || !from) return
+          if (Math.abs(e.clientX - from.x) > LONG_PRESS_SLACK || Math.abs(e.clientY - from.y) > LONG_PRESS_SLACK) cancel()
+        }}
+        onPointerUp={cancel}
+        onPointerCancel={cancel}
+        onClickCapture={(e) => {
+          // 长按松手后浏览器还会补一次 click：吞掉它，否则详情面板会盖在刚弹出的菜单上
+          if (Date.now() - firedAt.current < 800) {
+            e.preventDefault()
+            e.stopPropagation()
+          }
+        }}
+      >
+        {children}
+      </div>
+      {open && createPortal(
+        <FloatingContextMenu
+          pos={pos}
+          items={items}
+          onPick={(key) => { setOpen(false); onClick(key) }}
+          onClose={() => setOpen(false)}
+        />,
+        document.body,
+      )}
+    </>
+  )
+}
+
+// ========== 种子菜单下拉（桌面右键 / 移动长按或点 ⋮） ==========
 export function TorrentMenuDropdown({
   items,
   onClick,
@@ -383,31 +474,9 @@ export function TorrentMenuDropdown({
   align?: 'start' | 'center' | 'end'
 }) {
   const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState({ x: 0, y: 0 })
 
   if (trigger === 'contextMenu') {
-    return (
-      <>
-        <div
-          onContextMenu={(e) => {
-            e.preventDefault()
-            setPos({ x: e.clientX, y: e.clientY })
-            setOpen(true)
-          }}
-        >
-          {children}
-        </div>
-        {open && createPortal(
-          <FloatingContextMenu
-            pos={pos}
-            items={items}
-            onPick={(key) => { setOpen(false); onClick(key) }}
-            onClose={() => setOpen(false)}
-          />,
-          document.body,
-        )}
-      </>
-    )
+    return <ContextMenuAnchor items={items} onClick={onClick}>{children}</ContextMenuAnchor>
   }
 
   return (
@@ -417,7 +486,8 @@ export function TorrentMenuDropdown({
           {children}
         </div>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="glass-panel-strong min-w-44 max-h-[80vh] overflow-y-auto" align={align} sideOffset={4}>
+      {/* 高度由基类的 --radix-dropdown-menu-content-available-height 约束，不再叠 vh 上限 */}
+      <DropdownMenuContent className="glass-panel-strong min-w-44 overflow-y-auto" align={align} sideOffset={4}>
         {/* 选中后显式关闭：renderItems 内对 onSelect 调用了 preventDefault（Radix 会因此不自动关闭） */}
         {renderItems(items, (key) => { setOpen(false); onClick(key) })}
       </DropdownMenuContent>
@@ -651,6 +721,9 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
             <div className="space-y-2">
               <textarea
                 rows={8}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={trackers.join('\n')}
                 onChange={(e) => setTrackers(e.target.value.split('\n'))}
                 placeholder="http://tracker1/announce"

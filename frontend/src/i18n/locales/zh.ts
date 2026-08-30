@@ -38,6 +38,14 @@ export default {
     status: '状态',
     torrentCount: '种子总数',
     noResults: '无匹配结果',
+    remove: '移除',
+  },
+  auth: {
+    title: '需要访问令牌',
+    desc: '该服务已启用 API_TOKEN 鉴权，请输入服务端配置的访问令牌。',
+    placeholder: '访问令牌',
+    overwrite: '本地已存有令牌，保存后将覆盖',
+    save: '保存并重试',
   },
   statusBar: {
     freeSpace: '剩余空间',
@@ -48,6 +56,7 @@ export default {
     nav: '站点',
     all: '全部站点',
     other: '其他',
+    searchAria: '搜索站点',
   },
   theme: {
     title: '主题',
@@ -296,6 +305,8 @@ export default {
 
   topbar: {
     searchPlaceholder: '搜索任务或磁力链接...',
+    searchAria: '按名称搜索种子，按斜杠键聚焦',
+    quickSettings: '打开快速设置：主题、语言与统计',
     addTask: '添加任务',
   },
   floatingBar: {

@@ -51,8 +51,8 @@ export function SpeedHistory() {
         {[0.25, 0.5, 0.75].map((r) => (
           <line key={r} x1="0" y1={H * r} x2={W} y2={H * r} stroke="rgba(128,128,128,0.15)" strokeWidth="1" />
         ))}
-        <path d={toPath('down')} fill="none" stroke="#16a34a" strokeWidth="2" strokeLinejoin="round" />
-        <path d={toPath('up')} fill="none" stroke="#2563eb" strokeWidth="2" strokeLinejoin="round" />
+        <path d={toPath('down')} fill="none" strokeWidth="2" strokeLinejoin="round" className="stroke-green-600 dark:stroke-green-400" />
+        <path d={toPath('up')} fill="none" strokeWidth="2" strokeLinejoin="round" className="stroke-blue-600 dark:stroke-blue-400" />
       </svg>
       <div className="flex justify-between text-footnote mt-1">
         <span className="text-green-600 dark:text-green-400">

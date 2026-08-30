@@ -350,7 +350,7 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
               )}
               {/* 种子内容：文件列表 + 勾选下载 + 搜索（qB 风格） */}
               {parsed.length > 0 && (
-                <div className="space-y-2 max-h-[32vh] overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-[32dvh] overflow-y-auto pr-1">
                   {parsed.map((p, pi) => {
                     const sel = selections[pi] ?? []
                     const q = (searches[pi] ?? '').trim().toLowerCase()
@@ -419,6 +419,9 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
           ) : (
             <textarea
               rows={4}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder={t('addTorrent.urlPlaceholder') + '（' + t('common.eachLineOne') + '）'}
               value={urlText}
               onChange={(e) => setUrlText(e.target.value)}

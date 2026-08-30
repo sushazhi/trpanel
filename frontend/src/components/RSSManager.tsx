@@ -139,7 +139,7 @@ export function RSSManager({ open, onClose }: { open: boolean; onClose: () => vo
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-[680px] h-[80vh] flex flex-col p-0">
+      <DialogContent className="sm:max-w-[680px] h-[80dvh] flex flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
           <DialogTitle>{t('rss.title')}</DialogTitle>
         </DialogHeader>

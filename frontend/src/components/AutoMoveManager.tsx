@@ -100,7 +100,7 @@ export function AutoMoveManager({ open, onClose }: { open: boolean; onClose: () 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-[640px] h-[80vh] flex flex-col p-0">
+      <DialogContent className="sm:max-w-[640px] h-[80dvh] flex flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
           <DialogTitle>{t('autoMove.title')}</DialogTitle>
         </DialogHeader>

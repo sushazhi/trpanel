@@ -61,7 +61,7 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.Co
 
     return (
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/25 backdrop-blur-[10px] backdrop-saturate-[.8] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/35 backdrop-blur-[14px] backdrop-saturate-[.8] data-[state=open]:animate-tm-fade-in data-[state=closed]:animate-tm-fade-out" />
         <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center">
           <DialogPrimitive.Content
             ref={ref}
@@ -71,9 +71,10 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.Co
             }}
             style={dragY > 0 ? { transform: `translateY(${dragY}px)` } : undefined}
             className={cn(
-              'pointer-events-auto relative w-full max-w-lg glass-panel-strong rounded-t-dock',
-              'pb-[calc(1rem+var(--safe-bottom))] data-[state=open]:animate-in data-[state=closed]:animate-out',
-              'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-bottom-2 data-[state=open]:slide-in-from-bottom-2',
+              'pointer-events-auto relative w-full max-w-lg tm-sheet glass-panel-strong rounded-t-dock',
+              'pb-[calc(1rem+var(--safe-bottom))] data-[state=open]:animate-tm-sheet-in data-[state=closed]:animate-tm-sheet-out',
+              // 未达阈值松手时回弹要有弹性，而不是直接跳回原位
+              'transition-transform duration-[420ms] [transition-timing-function:var(--ease-spring)]',
               dragging && '!transition-none',
               className,
             )}
@@ -86,7 +87,7 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.Co
               onPointerUp={release}
               onPointerCancel={release}
               data-sheet-handle
-              className="shrink-0 pt-2.5 pb-1 flex justify-center cursor-grab active:cursor-grabbing touch-none"
+              className="shrink-0 pt-3 pb-2 flex justify-center cursor-grab active:cursor-grabbing touch-none"
             >
               <span className="h-[5px] w-9 rounded-full bg-gray-400/50 dark:bg-gray-500/60" />
             </div>

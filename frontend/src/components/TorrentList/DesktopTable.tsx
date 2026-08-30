@@ -12,7 +12,8 @@ import type { ColumnConfig, Torrent } from '@/types'
 import { formatBytes, formatDate, formatDuration, formatEta, formatRatio, formatSpeed } from '@/utils/format'
 import { translateError } from '@/utils/errorText'
 import { toast } from '@/lib/toast'
-import { cn } from '@/lib/utils'
+import { cn, cssVars } from '@/lib/utils'
+import { tagColor } from '@/utils/tagColor'
 import { StatusTag } from '@/components/status/StatusTag'
 import { ProgressBar } from '@/components/TorrentList/ProgressBar'
 import { buildTorrentMenu, EditModals, FloatingContextMenu, TorrentMenuDropdown } from '@/components/TorrentMenu'
@@ -86,7 +87,12 @@ function Cell({ torrent, col }: { torrent: Torrent; col: ColumnConfig }) {
         <span className="flex gap-1">
           {torrent.labels?.length ? (
             torrent.labels.map((l) => (
-              <Badge key={l} variant="outline" className="text-caption2 px-1.5 py-0 leading-none bg-primary/5">
+              <Badge
+                key={l}
+                variant="outline"
+                className="tm-chip text-caption2 px-1.5 py-0 leading-none"
+                style={cssVars({ '--chip': tagColor(l) })}
+              >
                 {l}
               </Badge>
             ))
@@ -186,8 +192,9 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
     if (headerRef.current) headerRef.current.scrollLeft = e.currentTarget.scrollLeft
   }
 
-  // 正在拖拽调宽的列：拖拽期间分隔线保持高亮，避免跟随鼠标时看不清落点
-  const [resizingCol, setResizingCol] = useState<string | null>(null)
+  // 正在拖拽调宽的列（含实时预览宽度）：拖拽期间分隔线保持高亮，
+  // 且只走本地状态——写 store 等于每帧序列化整份列配置落一次 localStorage
+  const [resizing, setResizing] = useState<{ key: string; width: number } | null>(null)
 
   // 表头拖拽调整列宽
   const startColResize = (e: React.MouseEvent, col: ColumnConfig) => {
@@ -195,19 +202,27 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
     e.stopPropagation()
     const startX = e.clientX
     const startWidth = col.width ?? 100
-    const onMove = (ev: MouseEvent) => setColumnWidth(col.key, startWidth + (ev.clientX - startX))
+    const onMove = (ev: MouseEvent) =>
+      setResizing({
+        key: col.key,
+        width: Math.min(900, Math.max(60, Math.round(startWidth + ev.clientX - startX))),
+      })
     const onUp = () => {
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      setResizingCol(null)
+      // 只有松手这一次才真正提交
+      setResizing((cur) => {
+        if (cur) setColumnWidth(cur.key, cur.width)
+        return null
+      })
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
-    setResizingCol(col.key)
+    setResizing({ key: col.key, width: startWidth })
   }
 
   // 表头列拖拽移动（指针事件实现，不用 HTML5 DnD：避免浏览器半透明拖影、draggable 与调宽手柄冲突）
@@ -407,9 +422,13 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
   }
 
   // 所有列统一固定宽度（名称列默认 320），行尾占位吸收剩余空间
+  // 拖拽中的宽度只在本地预览态里，这里优先读它，表头与单元格才会实时跟手
+  const colWidth = (col: ColumnConfig) =>
+    resizing?.key === col.key ? resizing.width : col.width ?? 100
+
   const headerStyle = (col: ColumnConfig) => ({
-    width: col.width ?? 100,
-    flex: `0 0 ${col.width ?? 100}px`,
+    width: colWidth(col),
+    flex: `0 0 ${colWidth(col)}px`,
   })
 
   // 可排序列的排序图标
@@ -429,7 +448,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
           e.preventDefault()
           setColMenuPos({ x: e.clientX, y: e.clientY })
         }}
-        className="tm-dock glass-panel flex items-center px-3 h-9 text-footnote font-semibold tracking-wide text-gray-400 dark:text-gray-500 shrink-0 overflow-hidden"
+        className="tm-dock glass-panel flex items-center px-3 h-9 text-footnote font-semibold tracking-wide text-gray-500 dark:text-gray-400 shrink-0 overflow-hidden"
       >
         {showCheckboxes && <div className="w-8 shrink-0" />}
         {visibleColumns.map((col) => {
@@ -462,7 +481,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
                 <span
                   className={cn(
                     'rounded-full transition-all duration-150',
-                    resizingCol === col.key
+                    resizing?.key === col.key
                       ? 'w-[3px] h-[85%] bg-primary'
                       : 'w-[2px] h-[65%] bg-gray-400/90 dark:bg-gray-500 group-hover/resize:w-[3px] group-hover/resize:h-[85%] group-hover/resize:bg-primary',
                   )}

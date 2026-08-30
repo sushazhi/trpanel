@@ -28,14 +28,15 @@ import { useNavRail } from '@/hooks/useNavRail'
 import { formatBytes, formatRatio, formatSpeed } from '@/utils/format'
 import { translateError } from '@/utils/errorText'
 import { tagColor } from '@/utils/tagColor'
-import { cn } from '@/lib/utils'
+import { cn, cssVars } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 
 // 主状态过滤（与图一 1:1）：全部 / 正在下载 / 正在做种 / 已完成 / 暂停 / 校验 / 错误
 // 图标统一由中性色承载、激活时染品牌色；仅 error 在存在异常时保留红色语义
-const STATUS_ITEMS: { key: string; icon: React.ElementType; label: string }[] = [
+// 导出供移动端滑动切分类复用：滑动顺序与列表必须同源，否则会出现滑得到、点不到的分类
+export const STATUS_ITEMS: { key: string; icon: React.ElementType; label: string }[] = [
   { key: 'all', icon: Layers, label: 'nav.all' },
   { key: 'downloading', icon: CloudDownload, label: 'nav.downloading' },
   { key: 'seeding', icon: Download, label: 'nav.seeding' },
@@ -90,6 +91,18 @@ export const DesktopSidebar: React.FC = () => {
   useEffect(() => () => {
     if (submenuTimer.current) window.clearTimeout(submenuTimer.current)
   }, [])
+
+  // 右键菜单只能点外部关闭的话，键盘用户就被困在里面了：至少让 Esc 生效
+  useEffect(() => {
+    if (!ctxMenu) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setCtxMenu(null)
+      setSubmenuOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [ctxMenu])
 
   // 下载目录可用空间（DiskRing，60s 刷新）
   const [freeSpace, setFreeSpace] = useState<{ freeSpace: number; totalSize: number } | null>(null)
@@ -300,9 +313,9 @@ export const DesktopSidebar: React.FC = () => {
               <circle cx="29" cy="29" r="22" stroke="rgba(120,130,160,0.16)" strokeWidth="6.5" fill="none" />
               <circle
                 cx="29" cy="29" r="22"
-                stroke="var(--color-primary)" strokeWidth="6.5" fill="none" strokeLinecap="round"
+                strokeWidth="6.5" fill="none" strokeLinecap="round"
                 strokeDasharray={`${2 * Math.PI * 22 * freeRatio} ${2 * Math.PI * 22}`}
-                style={{ transition: 'stroke-dasharray 0.6s var(--ease-standard)' }}
+                style={{ stroke: 'var(--color-primary)', transition: 'stroke-dasharray 0.6s var(--ease-standard)' }}
               />
             </svg>
             <div className="min-w-0">
@@ -451,20 +464,18 @@ export const DesktopSidebar: React.FC = () => {
                           dblSelect(torrents.filter((t) => t.labels?.includes(label)).map((t) => t.id))
                         }
                         className={cn(
-                          'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-body font-medium transition-all tm-nav-item',
-                          isActive ? 'shadow-sm scale-105' : 'opacity-90 hover:opacity-100',
+                          'tm-chip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-body font-medium transition-all tm-nav-item',
+                          isActive ? 'scale-105' : 'opacity-90 hover:opacity-100',
                         )}
-                        style={{
-                          backgroundColor: isActive ? color : `${color}1c`,
-                          color: isActive ? '#fff' : color,
-                          boxShadow: isActive ? `0 2px 8px ${color}55` : undefined,
-                        }}
+                        data-active={isActive || undefined}
+                        style={cssVars({ '--chip': color })}
                       >
+                        {isActive && <Check className="w-3 h-3 shrink-0" strokeWidth={2.6} />}
                         {label}
                         {groupShowSize && size > 0 && (
-                          <span className={cn('tm-mono text-caption2', isActive ? 'text-white/85' : 'opacity-70')}>{formatBytes(size)}</span>
+                          <span className="tm-mono text-caption2 opacity-70">{formatBytes(size)}</span>
                         )}
-                        <span className={cn('tm-mono text-caption2', isActive ? 'text-white/85' : 'opacity-70')}>{count}</span>
+                        <span className="tm-mono text-caption2 opacity-70">{count}</span>
                       </button>
                     )
                   })}
@@ -562,6 +573,8 @@ export const DesktopSidebar: React.FC = () => {
           />
           <div
             className="fixed z-50 min-w-44 rounded-tile glass-panel-strong p-1"
+            role="menu"
+            aria-orientation="vertical"
             style={{ left: Math.min(ctxMenu.x, window.innerWidth - 180), top: Math.min(ctxMenu.y, window.innerHeight - 220) }}
           >
             <CtxCheck
@@ -667,6 +680,8 @@ function CtxCheck({ label, checked, onClick }: { label: string; checked: boolean
   return (
     <button
       onClick={onClick}
+      role="menuitemcheckbox"
+      aria-checked={checked}
       className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-footnote text-left hover:bg-white/60 dark:hover:bg-white/10"
     >
       <span className="w-3.5 shrink-0 flex justify-center text-primary">{checked && <Check className="w-3.5 h-3.5" strokeWidth={2.4} />}</span>
@@ -689,23 +704,34 @@ function SectionHeader({
   collapsed?: boolean
   onToggle?: () => void
 }) {
-  const content = (
-    <div
-      className={cn(
-        'flex items-center gap-1.5 px-1 select-none text-gray-500 dark:text-gray-400',
-        onToggle && 'cursor-pointer hover:text-gray-700 dark:hover:text-gray-200',
-      )}
-      onClick={onToggle}
-    >
+  const inner = (
+    <>
       {onToggle && (
         <ChevronDown className={cn('w-3 h-3 text-gray-400 transition-transform duration-200', collapsed && '-rotate-90')} />
       )}
       <span className="text-primary">{icon}</span>
       <span className="text-body font-semibold uppercase tracking-wider">{title}</span>
       {typeof count === 'number' && <span className="text-caption2 tm-mono text-gray-400 ml-auto">{count}</span>}
-    </div>
+    </>
   )
-  return content
+  const cls = 'flex items-center gap-1.5 px-1 select-none text-gray-500 dark:text-gray-400'
+
+  // 可折叠的标题是一个真按钮：div + onClick 拿不到键盘焦点，也读不出展开状态
+  if (!onToggle) return <div className={cls}>{inner}</div>
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      className={cn(
+        cls,
+        'w-full rounded-md hover:text-gray-700 dark:hover:text-gray-200 transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+      )}
+    >
+      {inner}
+    </button>
+  )
 }
 
 // ========== 站点分组导航 ==========
@@ -750,25 +776,22 @@ const SiteNav: React.FC<SiteNavProps> = ({ sites, siteStats, currentSiteIds, onS
 
   return (
     <>
-      <div
-        className="flex items-center gap-1.5 mb-1 px-1 cursor-pointer select-none text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-        onClick={onToggle}
-      >
-        <ChevronDown
-          className={cn('w-3 h-3 text-gray-400 transition-transform duration-200', collapsed && '-rotate-90')}
-        />
-        <Server className="w-3.5 h-3.5 text-primary" />
-        <span className="text-body font-semibold uppercase tracking-wider">{t('site.nav')}</span>
-        <span className="text-caption2 tm-mono text-gray-400 ml-auto">{siteEntries.length}</span>
-      </div>
+      <SectionHeader
+        icon={<Server className="w-3.5 h-3.5" />}
+        title={t('site.nav')}
+        count={siteEntries.length}
+        collapsed={collapsed}
+        onToggle={onToggle}
+      />
 
       {!collapsed && (
         <>
-          <div className="relative mb-1.5">
+          <div className="relative mt-1 mb-1.5">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              aria-label={t('site.searchAria')}
               placeholder={t('common.search')}
               className="h-8 pl-8 text-footnote bg-white/50 dark:bg-white/5 border-white/60 dark:border-white/10 rounded-lg focus-visible:ring-primary/50"
             />
@@ -970,7 +993,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
 
   return (
     <Sheet open={visible} onOpenChange={onClose}>
-      <SheetContent className="h-[78vh] sm:max-w-sm flex flex-col" onDismiss={onClose}>
+      <SheetContent className="h-[78dvh] sm:max-w-sm flex flex-col" onDismiss={onClose}>
         <SheetHeader className="border-b border-white/60 dark:border-white/10 pb-2">
           <SheetTitle className="flex items-center gap-2">
             <span className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] flex items-center justify-center">
@@ -1005,9 +1028,9 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
               <circle cx="29" cy="29" r="22" stroke="rgba(120,130,160,0.16)" strokeWidth="6.5" fill="none" />
               <circle
                 cx="29" cy="29" r="22"
-                stroke="var(--color-primary)" strokeWidth="6.5" fill="none" strokeLinecap="round"
+                strokeWidth="6.5" fill="none" strokeLinecap="round"
                 strokeDasharray={`${2 * Math.PI * 22 * freeRatio} ${2 * Math.PI * 22}`}
-                style={{ transition: 'stroke-dasharray 0.6s var(--ease-standard)' }}
+                style={{ stroke: 'var(--color-primary)', transition: 'stroke-dasharray 0.6s var(--ease-standard)' }}
               />
             </svg>
             <div className="min-w-0">
@@ -1177,17 +1200,15 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                           onClose()
                         }}
                         className={cn(
-                          'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-body font-medium transition-all tm-nav-item',
-                          isActive ? 'shadow-sm scale-105' : 'opacity-90 hover:opacity-100',
+                          'tm-chip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-body font-medium transition-all tm-nav-item',
+                          isActive ? 'scale-105' : 'opacity-90 hover:opacity-100',
                         )}
-                        style={{
-                          backgroundColor: isActive ? color : `${color}1c`,
-                          color: isActive ? '#fff' : color,
-                          boxShadow: isActive ? `0 2px 8px ${color}55` : undefined,
-                        }}
+                        data-active={isActive || undefined}
+                        style={cssVars({ '--chip': color })}
                       >
+                        {isActive && <Check className="w-3 h-3 shrink-0" strokeWidth={2.6} />}
                         {label}
-                        <span className={cn('tm-mono text-caption2', isActive ? 'text-white/85' : 'opacity-70')}>{count}</span>
+                        <span className="tm-mono text-caption2 opacity-70">{count}</span>
                       </button>
                     )
                   })}

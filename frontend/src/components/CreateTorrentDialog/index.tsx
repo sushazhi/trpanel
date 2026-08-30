@@ -198,6 +198,9 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
           />
           <textarea
             rows={2}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder={t('createTorrent.webSeeds')}
             value={webSeeds}
             onChange={(e) => setWebSeeds(e.target.value)}

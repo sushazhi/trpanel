@@ -91,7 +91,8 @@ export function FloatingBar({ isMobile, onOpenAdd, onOpenClean, scrollHost }: Pr
       aria-label={t('floatingBar.label')}
       inert={hidden || undefined}
       className={cn(
-        'fixed z-40 left-1/2 bottom-[calc(var(--chrome-inset-bottom)+var(--statusbar-h)+8px)]',
+        // 停靠边界取自实测：状态栏高度随字号设置变化，写死像素会让胶囊压上去
+        'fixed z-40 left-1/2 bottom-[calc(var(--pad-bottom)-var(--shell-gap)+8px)]',
         // 玻璃胶囊：float 档材质 + 完全圆角，内层按钮同为圆角构成同心关系
         'tm-dock glass-panel-strong flex items-center rounded-full p-1.5',
         // 居中偏移与隐藏位移各自只写 --tw-translate-x / -y，
@@ -99,7 +100,7 @@ export function FloatingBar({ isMobile, onOpenAdd, onOpenClean, scrollHost }: Pr
         '-translate-x-1/2',
         'transition-[transform,translate,opacity] duration-[350ms] [transition-timing-function:var(--ease-spring)]',
         // fixed 元素不受 shell 的 overflow 裁切，位移量必须覆盖"自身高 + 到视口底的偏移"
-        hidden && 'translate-y-[calc(100%+var(--chrome-inset-bottom)+var(--statusbar-h)+16px)] opacity-0',
+        hidden && 'translate-y-[calc(100%+var(--pad-bottom)+8px)] opacity-0',
       )}
     >
       {/* 展开手柄：+ 旋转 45° 读作 ×，同一控件承担开与合 */}

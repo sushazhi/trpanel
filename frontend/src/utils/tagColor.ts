@@ -1,5 +1,7 @@
-// 标签徽标颜色池（图一：蓝/紫/绿/橙），按名称稳定散列
-const TAG_COLORS = ['#007aff', '#8b5cf6', '#34c759', '#ff9500']
+// 标签徽标颜色池，按名称稳定散列。
+// 只引用 styles/index.css 的 --hue-* 分类色相：色值不再有两份真相，
+// 而且刻意不复用 --color-status-*，免得一个标签看起来像一个状态。
+const TAG_COLORS = ['var(--hue-blue)', 'var(--hue-purple)', 'var(--hue-green)', 'var(--hue-orange)']
 
 export function tagColor(label: string): string {
   let h = 0

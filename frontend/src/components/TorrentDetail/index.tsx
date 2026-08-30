@@ -787,7 +787,7 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
     <>
       {isMobile ? (
         <Sheet open={!!torrent} onOpenChange={(o) => { if (!o) closeDetail() }}>
-          <SheetContent onDismiss={closeDetail} className="max-w-none max-h-[88vh] flex flex-col">
+          <SheetContent onDismiss={closeDetail} className="max-w-none max-h-[88dvh] flex flex-col">
             <SheetHeader className="px-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
               <SheetTitle className="text-subhead pr-8">
                 <span className="block truncate">{torrent?.name}</span>
@@ -798,7 +798,7 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
         </Sheet>
       ) : (
         <Dialog open={!!torrent} onOpenChange={(o) => { if (!o) closeDetail() }}>
-          <DialogContent className="sm:max-w-3xl h-[90vh] sm:h-auto sm:max-h-[85vh] flex flex-col p-0">
+          <DialogContent className="sm:max-w-3xl h-[90dvh] sm:h-auto sm:max-h-[85dvh] flex flex-col p-0">
             <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
               <DialogTitle className="flex items-center gap-2 text-subhead pr-8">
                 <span className="truncate">{torrent?.name}</span>

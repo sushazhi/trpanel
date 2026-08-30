@@ -38,6 +38,14 @@ export default {
     status: 'Status',
     torrentCount: 'Torrents: {{count}}',
     noResults: 'No results',
+    remove: 'Remove',
+  },
+  auth: {
+    title: 'Access token required',
+    desc: 'This server has API_TOKEN authentication enabled. Enter the access token configured on the server.',
+    placeholder: 'Access token',
+    overwrite: 'A token is already stored locally and will be replaced',
+    save: 'Save & retry',
   },
   statusBar: {
     freeSpace: 'Free Space',
@@ -48,6 +56,7 @@ export default {
     nav: 'Sites',
     all: 'All Sites',
     other: 'Others',
+    searchAria: 'Search sites',
   },
   theme: {
     title: 'Theme',
@@ -297,6 +306,8 @@ export default {
 
   topbar: {
     searchPlaceholder: 'Search torrents or magnet links...',
+    searchAria: 'Search torrents by name, press / to focus',
+    quickSettings: 'Open quick settings: theme, language and stats',
     addTask: 'Add Task',
   },
   floatingBar: {

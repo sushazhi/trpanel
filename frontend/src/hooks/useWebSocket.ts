@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getAuthToken } from '@/api/authToken'
 import { useAppStore } from '@/stores/appStore'
 import { torrentApi } from '@/api/torrent'
 import { APP_BASE } from '@/platform/appBase'
@@ -67,10 +68,13 @@ export function useWebSocket() {
         return
       }
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+      // 握手无法携带自定义请求头，令牌只能走查询参数（后端仅对 /ws 接受该参数）
+      const token = getAuthToken()
+      const handshake = token ? `?token=${encodeURIComponent(token)}` : ''
       let socket: WebSocket
       try {
         // APP_BASE：网关部署时的基础路径（见 platform/appBase），直连部署为空串
-        socket = new WebSocket(`${proto}://${location.host}${APP_BASE}/ws`)
+        socket = new WebSocket(`${proto}://${location.host}${APP_BASE}/ws${handshake}`)
       } catch {
         startPolling()
         return
