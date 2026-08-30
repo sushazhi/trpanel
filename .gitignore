@@ -21,6 +21,8 @@ dev/
 !.env.example
 backend/.env
 backend/.env.local
+# 运行期状态文件明文保存各服务器凭据（TM_DATA_DIR 指向仓库时勿提交）
+tm-state.json
 
 # ===== IDE =====
 .idea/

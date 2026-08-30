@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/transmission-manager/backend/internal/state"
@@ -55,13 +56,15 @@ func (h *Handler) saveRSSFeed(c *gin.Context) {
 func (h *Handler) deleteRSSFeed(c *gin.Context) {
 	id := c.Param("id")
 	var deleted bool
-	_ = h.state.Update(func(st *state.State) {
+	err := h.state.Update(func(st *state.State) {
 		for i := range st.RSSFeeds {
 			if st.RSSFeeds[i].ID == id {
 				st.RSSFeeds = append(st.RSSFeeds[:i], st.RSSFeeds[i+1:]...)
-				// 清理已处理记录
+				// 清理该源的全部已处理记录（键由 state.RSSKey 构造，前缀自带分隔符，
+				// 不会误删以该 id 为前缀的其它源的记录）
+				prefix := state.RSSKey(id, "")
 				for k := range st.ProcessedRSS {
-					if len(k) > len(id) && k[:len(id)] == id && k[len(id)] == '\x00' {
+					if strings.HasPrefix(k, prefix) {
 						delete(st.ProcessedRSS, k)
 					}
 				}
@@ -72,6 +75,10 @@ func (h *Handler) deleteRSSFeed(c *gin.Context) {
 	})
 	if !deleted {
 		respondError(c, http.StatusBadRequest, "RSS 源不存在")
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "删除已生效但保存状态失败: "+err.Error())
 		return
 	}
 	respond(c, gin.H{"deleted": true})

@@ -116,10 +116,11 @@ func (h *Handler) Register(r *gin.Engine, prefix string) {
 	}
 	// 宿主平台专属接口（如 fnOS 的应用更新；通用平台为空实现，不挂载任何路由）
 	h.plat.RegisterRoutes(api)
-	// WebSocket
+	// WebSocket：浏览器无法为握手设置自定义请求头，令牌只能走 ?token=，
+	// 因此这条路由单独使用允许查询参数的鉴权（普通 API 只认请求头）。
 	wsGuard := []gin.HandlerFunc{}
 	if h.apiToken != "" {
-		wsGuard = append(wsGuard, middleware.Auth(h.apiToken))
+		wsGuard = append(wsGuard, middleware.AuthAllowQuery(h.apiToken))
 	}
 	r.GET(prefix+"/ws", append(wsGuard, h.hub.HandleWS)...)
 }
@@ -129,7 +130,8 @@ func respond(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, models.OK(data))
 }
 
-// respondError 失败响应
+// respondError 失败响应。
+// 统一经 sanitizeClientMsg 处理：上游 RPC 错误可能内嵌带凭据的地址，不做脱敏即等于泄露密码。
 func respondError(c *gin.Context, status int, msg string) {
-	c.JSON(status, models.Error(msg))
+	c.JSON(status, models.Error(sanitizeClientMsg(msg)))
 }

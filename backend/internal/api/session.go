@@ -22,7 +22,8 @@ func (h *Handler) getSession(c *gin.Context) {
 func (h *Handler) sessionStatus(c *gin.Context) {
 	version, err := h.rpc.Client().Ping(c.Request.Context())
 	if err != nil {
-		respond(c, models.SessionStatus{Connected: false, Error: err.Error()})
+		// 该接口以 200 返回连接状态，绕过了 respondError 的统一脱敏，需自行抹掉错误里的凭据
+		respond(c, models.SessionStatus{Connected: false, Error: sanitizeClientMsg(err.Error())})
 		return
 	}
 	respond(c, models.SessionStatus{Connected: true, Version: version})
@@ -50,6 +51,13 @@ func (h *Handler) blocklistUpdate(c *gin.Context) {
 
 // systemCommand 系统命令（支持 shutdown / reboot）
 func (h *Handler) systemCommand(c *gin.Context) {
+	// 破坏性操作：默认配置（无 API_TOKEN）下 Auth 为空操作，而同源写守卫只挡浏览器跨站请求，
+	// 局域网内任意 curl 都能停机。因此要求部署本身具备认证边界：启用了令牌鉴权，
+	// 或经宿主网关统一认证（fnOS 网关模式）。
+	if h.apiToken == "" && !h.plat.SecurityPolicy().AllowEmbedding {
+		respondError(c, http.StatusForbidden, "系统命令需认证：请设置 API_TOKEN 启用令牌鉴权，或经宿主网关部署")
+		return
+	}
 	action := c.Param("action")
 	if action != "shutdown" && action != "reboot" {
 		respondError(c, http.StatusBadRequest, "不支持的系统命令: "+action)

@@ -1,6 +1,9 @@
 package fnos
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +32,7 @@ const (
 	fpkMaxSize        = 100 << 20 // 100 MB
 	downloadTimeout   = 3 * time.Minute
 	defaultAppVersion = "1.0.0"
+	sha256HexLen      = 64 // SHA-256 的十六进制表示长度
 )
 
 var (
@@ -114,6 +118,8 @@ type githubRelease struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 		Size               int64  `json:"size"`
+		// Digest 由 GitHub 侧计算（形如 "sha256:<hex>"），是走代理下载时唯一的完整性依据
+		Digest string `json:"digest"`
 	} `json:"assets"`
 }
 
@@ -125,6 +131,7 @@ type releaseInfo struct {
 	FPKURL      string
 	FPKName     string
 	FPKSize     int64
+	FPKDigest   string // 期望的 SHA256（十六进制小写），空表示上游未提供
 }
 
 // fetchLatestRelease 查询 GitHub 最新 Release 并按架构挑选 fpk 更新包
@@ -151,18 +158,18 @@ func fetchLatestRelease() (*releaseInfo, error) {
 	}
 	arch := appArch()
 	archSuffix := "-" + arch + ".fpk"
-	var fpkURL, fpkName string
+	var fpkURL, fpkName, fpkDigest string
 	var fpkSize int64
 	for _, a := range rel.Assets {
 		if strings.HasSuffix(a.Name, archSuffix) && strings.Contains(strings.ToLower(a.Name), "transmission") {
-			fpkURL, fpkName, fpkSize = a.BrowserDownloadURL, a.Name, a.Size
+			fpkURL, fpkName, fpkSize, fpkDigest = a.BrowserDownloadURL, a.Name, a.Size, normalizeDigest(a.Digest)
 			break
 		}
 	}
 	if fpkURL == "" {
 		for _, a := range rel.Assets {
 			if strings.HasSuffix(a.Name, ".fpk") {
-				fpkURL, fpkName, fpkSize = a.BrowserDownloadURL, a.Name, a.Size
+				fpkURL, fpkName, fpkSize, fpkDigest = a.BrowserDownloadURL, a.Name, a.Size, normalizeDigest(a.Digest)
 				break
 			}
 		}
@@ -175,7 +182,27 @@ func fetchLatestRelease() (*releaseInfo, error) {
 		FPKURL:      fpkURL,
 		FPKName:     fpkName,
 		FPKSize:     fpkSize,
+		FPKDigest:   fpkDigest,
 	}, nil
+}
+
+// normalizeDigest 归一化 GitHub 的资源摘要（"sha256:<hex>"）。
+// 只认 sha256 且必须是 64 位十六进制；算法不符或格式异常按未提供处理，
+// 免得把一条来历不明的摘要当成校验依据。
+func normalizeDigest(raw string) string {
+	raw = strings.TrimSpace(raw)
+	algorithm, hexSum, ok := strings.Cut(raw, ":")
+	if !ok || !strings.EqualFold(algorithm, "sha256") {
+		return ""
+	}
+	hexSum = strings.ToLower(strings.TrimSpace(hexSum))
+	if len(hexSum) != sha256HexLen {
+		return ""
+	}
+	if _, err := hex.DecodeString(hexSum); err != nil {
+		return ""
+	}
+	return hexSum
 }
 
 // updateService 更新检测/下载状态（进程内单例，含检查结果缓存）
@@ -362,7 +389,10 @@ func downloadFPK(url, dest string, info *releaseInfo, set func(int, string)) err
 		return err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0")
-	client := &http.Client{Timeout: downloadTimeout}
+	client := &http.Client{
+		Timeout:   downloadTimeout,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("网络错误: %w", err)
@@ -384,6 +414,7 @@ func downloadFPK(url, dest string, info *releaseInfo, set func(int, string)) err
 	}
 
 	buf := make([]byte, 64*1024)
+	hasher := sha256.New()
 	var downloaded int64
 	for {
 		n, rerr := resp.Body.Read(buf)
@@ -391,6 +422,7 @@ func downloadFPK(url, dest string, info *releaseInfo, set func(int, string)) err
 			if _, werr := f.Write(buf[:n]); werr != nil {
 				return fail("写入失败: %v", werr)
 			}
+			_, _ = hasher.Write(buf[:n])
 			downloaded += int64(n)
 			if downloaded > fpkMaxSize {
 				return fail("下载内容超过大小限制 (%d MB)", fpkMaxSize>>20)
@@ -431,6 +463,15 @@ func downloadFPK(url, dest string, info *releaseInfo, set func(int, string)) err
 	if info.FPKSize > 0 && downloaded != info.FPKSize {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("文件大小不匹配: 期望 %d 字节, 实际 %d 字节", info.FPKSize, downloaded)
+	}
+	// 完整性：下载链路经过第三方代理，大小与魔数都可伪造，只有 GitHub 侧算好的摘要
+	// （随 api.github.com 元数据直连取得）能证明这个包没被替换过
+	got := hex.EncodeToString(hasher.Sum(nil))
+	if info.FPKDigest == "" {
+		slog.Warn("发布资源未提供 SHA-256 摘要，本次仅校验了大小与魔数", "fpk", info.FPKName, "sha256", got)
+	} else if !strings.EqualFold(got, info.FPKDigest) {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("文件校验失败: SHA-256 与发布版本不一致（下载链路可能被替换）")
 	}
 	return os.Rename(tmp, dest)
 }

@@ -213,10 +213,12 @@ func (h *Handler) addTorrent(c *gin.Context) {
 // 是否允许读取、允许哪些目录由宿主平台的 FileAccess 策略决定：
 // 通用部署按 TORRENT_PATH_ROOTS 白名单限制，避免该接口沦为任意文件读取入口。
 func (h *Handler) readTorrentFile(path string) ([]byte, error) {
-	if err := h.plat.FileAccess().AllowRead(path); err != nil {
+	target, err := h.plat.FileAccess().AllowRead(path)
+	if err != nil {
 		return nil, err
 	}
-	return os.ReadFile(path)
+	// 读校验后解析出的真实路径，避免「按软链路径校验通过、却读到软链指向的敏感文件」
+	return os.ReadFile(target)
 }
 
 // addTorrentBatch 批量添加多个URL/磁力链接

@@ -1,8 +1,11 @@
 package api
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/transmission-manager/backend/internal/config"
@@ -40,20 +43,41 @@ func (h *Handler) saveServers(c *gin.Context) {
 			respondError(c, http.StatusBadRequest, "服务器地址不能为空")
 			return
 		}
+		// 切换服务器时会写入 .env.local（dotenv 按行解析），含换行即注入新的配置键
+		for _, f := range []struct{ name, value string }{
+			{"地址", body.Servers[i].URL},
+			{"用户名", body.Servers[i].User},
+			{"密码", body.Servers[i].Pass},
+		} {
+			if err := config.ValidateEnvValue(f.name, f.value); err != nil {
+				respondError(c, http.StatusBadRequest, fmt.Sprintf("第 %d 个服务器：%s", i+1, err.Error()))
+				return
+			}
+		}
 	}
 	err := h.state.Update(func(st *state.State) {
 		// 列表接口不返回密码（仅返回 hasPass），因此前端全量回传时 Pass 为空。
-		// 约定：地址未变且 Pass 为空 = 保持原密码不变，避免静默清空凭据。
+		// 约定：地址与名称未变且 Pass 为空 = 保持原密码不变，避免静默清空凭据。
+		// 必须按「地址+名称」匹配而非列表索引：界面上调整顺序后索引与服务器不再对应，
+		// 按索引回填会把上一个位置的密码安到下一个服务器上（地址相同时即凭据串号）。
+		old := make(map[string]string, len(st.Servers))
+		for _, s := range st.Servers {
+			old[s.URL+"\x00"+s.Name] = s.Pass
+		}
 		for i := range body.Servers {
 			if body.Servers[i].Pass != "" {
 				continue
 			}
-			if i < len(st.Servers) && st.Servers[i].URL == body.Servers[i].URL {
-				body.Servers[i].Pass = st.Servers[i].Pass
+			if pass, ok := old[body.Servers[i].URL+"\x00"+body.Servers[i].Name]; ok {
+				body.Servers[i].Pass = pass
 			}
 		}
 		st.Servers = body.Servers
-		if st.ActiveServer >= len(st.Servers) {
+		switch {
+		case len(st.Servers) == 0:
+			// 列表已空：0 不是有效索引，置 -1 表示无活动服务器
+			st.ActiveServer = -1
+		case st.ActiveServer < 0 || st.ActiveServer >= len(st.Servers):
 			st.ActiveServer = 0
 		}
 	})
@@ -72,20 +96,28 @@ func (h *Handler) deleteServer(c *gin.Context) {
 		return
 	}
 	var deleted bool
-	_ = h.state.Update(func(st *state.State) {
+	err = h.state.Update(func(st *state.State) {
 		if idx < 0 || idx >= len(st.Servers) {
 			return
 		}
 		st.Servers = append(st.Servers[:idx], st.Servers[idx+1:]...)
-		if st.ActiveServer == idx {
-			st.ActiveServer = 0
-		} else if st.ActiveServer > idx {
+		switch {
+		case len(st.Servers) == 0:
+			// 列表已空：0 不是有效索引，用 -1 表示当前没有活动服务器
+			st.ActiveServer = -1
+		case st.ActiveServer > idx:
 			st.ActiveServer--
+		case st.ActiveServer == idx:
+			st.ActiveServer = 0
 		}
 		deleted = true
 	})
 	if !deleted {
 		respondError(c, http.StatusBadRequest, "服务器不存在")
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "删除已生效但保存状态失败: "+err.Error())
 		return
 	}
 	respond(c, gin.H{"deleted": true})
@@ -125,10 +157,21 @@ func (h *Handler) switchServer(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "无法连接该服务器，已回滚: "+err.Error())
 		return
 	}
-	// 持久化
-	_ = h.state.Update(func(st2 *state.State) { st2.ActiveServer = body.Index })
-	_ = config.SaveConnection(h.dataDir, srv.URL, srv.User, srv.Pass, h.hub.getPollInterval().String())
+	// 持久化：内存已切换成功，写盘失败不回滚连接，但必须显式告知用户重启后会回滚
+	var warnings []string
+	if err := h.state.Update(func(st2 *state.State) { st2.ActiveServer = body.Index }); err != nil {
+		slog.Warn("持久化活动服务器失败", "index", body.Index, "err", err)
+		warnings = append(warnings, "活动服务器未能写入状态文件，重启后会回到原服务器")
+	}
+	if err := config.SaveConnection(h.dataDir, srv.URL, srv.User, srv.Pass, h.hub.getPollInterval().String()); err != nil {
+		slog.Warn("持久化连接配置失败", "err", err)
+		warnings = append(warnings, "连接配置未能写入 .env.local，重启后仍会使用原地址")
+	}
 	// 切换后立即触发一次拉取
 	h.hub.Bump()
-	respond(c, gin.H{"index": body.Index, "version": version})
+	out := gin.H{"index": body.Index, "version": version}
+	if len(warnings) > 0 {
+		out["warning"] = strings.Join(warnings, "；")
+	}
+	respond(c, out)
 }

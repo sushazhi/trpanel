@@ -2,7 +2,10 @@ package rpc
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -14,12 +17,13 @@ import (
 
 // Client Transmission RPC 客户端封装
 type Client struct {
-	tr        *trpc.Client
-	url       string
-	user      string
-	pass      string
-	sessionMu sync.Mutex // 保护 sessionID 的并发读写
-	sessionID string     // raw RPC 使用的会话 ID
+	tr         *trpc.Client
+	url        string
+	user       string
+	pass       string
+	httpClient *http.Client // 自建 HTTP 客户端（超时/TLS 下限），RawCall 与库共用
+	sessionMu  sync.Mutex   // 保护 sessionID 的并发读写
+	sessionID  string       // raw RPC 使用的会话 ID
 
 	listMu     sync.Mutex   // 保护列表缓存
 	listCache  []*Torrent   // 列表缓存（共享只读，调用方不得修改元素）
@@ -36,14 +40,40 @@ func New(transmissionURL, user, pass string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Transmission URL 无效: %w", err)
 	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("Transmission URL 协议必须是 http/https，当前为 %q", u.Scheme)
+	}
 	if user != "" {
 		u.User = url.UserPassword(user, pass)
 	}
-	tr, err := trpc.New(u, nil)
+	httpClient := newHTTPClient()
+	tr, err := trpc.New(u, &trpc.Config{CustomClient: httpClient})
 	if err != nil {
 		return nil, fmt.Errorf("初始化 Transmission 客户端失败: %w", err)
 	}
-	return &Client{tr: tr, url: transmissionURL, user: user, pass: pass}, nil
+	return &Client{tr: tr, url: transmissionURL, user: user, pass: pass, httpClient: httpClient}, nil
+}
+
+// newHTTPClient 构造访问 Transmission RPC 的专用 HTTP 客户端。
+// 不复用 http.DefaultClient / 库的缺省客户端：两者都没有整体超时与 TLS 版本下限，
+// 上游挂起会拖住请求协程，明文降级到 TLS 1.0/1.1 也无从拒绝。
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+			MaxIdleConns:          16,
+			MaxIdleConnsPerHost:   8,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
 }
 
 // Ping 检测连接是否可用并返回版本信息

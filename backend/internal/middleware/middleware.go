@@ -80,8 +80,19 @@ func SameOriginWriteGuard(p platform.Platform) gin.HandlerFunc {
 }
 
 // Auth 可选令牌鉴权（API_TOKEN 为空时整条链路保持原有「依赖宿主网关认证」的部署模型）。
-// 浏览器端通过 X-Auth-Token 头携带，WebSocket 因无法自定义头而使用 ?token= 查询参数。
+// 令牌只从请求头读取：查询参数会进入浏览器历史、代理与服务端访问日志、Referer，
+// 因此普通接口不接受 ?token=，WebSocket 握手另用 AuthAllowQuery。
 func Auth(token string) gin.HandlerFunc {
+	return authWith(token, false)
+}
+
+// AuthAllowQuery 在 Auth 基础上额外接受 ?token= 查询参数。
+// 仅供 WebSocket 握手使用——浏览器不能为 ws 请求设置自定义请求头。
+func AuthAllowQuery(token string) gin.HandlerFunc {
+	return authWith(token, true)
+}
+
+func authWith(token string, allowQuery bool) gin.HandlerFunc {
 	if token == "" {
 		return func(c *gin.Context) { c.Next() }
 	}
@@ -93,7 +104,7 @@ func Auth(token string) gin.HandlerFunc {
 				got = strings.TrimSpace(after)
 			}
 		}
-		if got == "" {
+		if got == "" && allowQuery {
 			got = c.Query("token")
 		}
 		if subtle.ConstantTimeCompare([]byte(got), want) != 1 {

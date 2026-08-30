@@ -115,8 +115,9 @@ func (p SecurityPolicy) ContentSecurityPolicy(host string) string {
 type FileAccess interface {
 	// Enabled 宿主是否支持按路径读取种子文件
 	Enabled() bool
-	// AllowRead 校验是否允许读取该路径，返回 nil 表示允许
-	AllowRead(path string) error
+	// AllowRead 校验是否允许读取该路径，返回解析过符号链接后的真实路径。
+	// 调用方必须打开返回的路径而非原始入参，否则校验的是一个路径、读取的是另一个路径。
+	AllowRead(path string) (string, error)
 }
 
 // Platform 宿主平台。新增宿主只需实现本接口并在 init 中调用 Register。

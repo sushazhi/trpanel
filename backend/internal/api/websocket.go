@@ -1,8 +1,8 @@
 package api
 
 import (
-	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -43,13 +43,14 @@ type Hub struct {
 	plat         platform.Platform
 	pollInterval atomic.Int64 // 纳秒，支持运行期热调整
 
-	mu          sync.RWMutex
-	lastData    []byte // 最近一次推送的全量数据缓存
-	clients     map[*wsClient]struct{}
-	clientCount atomic.Int64
-	register    chan *wsClient
-	unregister  chan *wsClient
-	broadcast   chan []byte
+	mu           sync.RWMutex
+	lastDigest   [sha256.Size]byte // 最近一轮种子数据的摘要，用于判断是否需要广播
+	lastEnvelope []byte            // 最近一次推送的信封报文，新客户端接入时直接补发
+	clients      map[*wsClient]struct{}
+	clientCount  atomic.Int64
+	register     chan *wsClient
+	unregister   chan *wsClient
+	broadcast    chan []byte
 	// bump 唤醒拉取协程（容量 1，多次 Bump 合并为一次补拉）
 	bump chan struct{}
 }
@@ -98,9 +99,9 @@ func (h *Hub) run() {
 			if h.clientCount.Add(1) == 1 {
 				h.Bump()
 			}
-			// 新连接立即推送当前缓存
+			// 新连接立即推送当前缓存（必须是前端可识别的信封报文）
 			h.mu.RLock()
-			last := h.lastData
+			last := h.lastEnvelope
 			h.mu.RUnlock()
 			if last != nil {
 				select {
@@ -162,7 +163,7 @@ func (h *Hub) wait(ctx context.Context) bool {
 func (h *Hub) hasLastData() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.lastData != nil
+	return h.lastEnvelope != nil
 }
 
 // Signal 打断等待，尽快拉取一次（合并短时间内多次信号）
@@ -187,15 +188,16 @@ func (h *Hub) pollLocked() {
 		slog.Error("轮询种子失败", "err", err)
 		return
 	}
-	// 差异比较仅基于种子数据（不含 timestamp，否则每次不同导致去重失效）
+	// 差异比较仅基于种子数据（不含 timestamp，否则每次不同导致去重失效）。
+	// 用摘要而不是整份 JSON 做比较：数百种子时避免常驻大块字节并逐轮整段比对。
 	torrentsData, err := json.Marshal(torrents)
 	if err != nil {
 		slog.Error("序列化种子数据失败", "err", err)
 		return
 	}
+	digest := sha256.Sum256(torrentsData)
 	h.mu.Lock()
-	unchanged := bytes.Equal(h.lastData, torrentsData)
-	h.lastData = torrentsData
+	unchanged := h.lastEnvelope != nil && h.lastDigest == digest
 	h.mu.Unlock()
 	if unchanged {
 		return
@@ -209,17 +211,28 @@ func (h *Hub) pollLocked() {
 		slog.Error("序列化推送数据失败", "err", err)
 		return
 	}
+	h.mu.Lock()
+	h.lastDigest = digest
+	h.lastEnvelope = data
+	h.mu.Unlock()
 	h.broadcast <- data
 }
 
 // HandleWS 处理 WebSocket 连接
 func (h *Hub) HandleWS(c *gin.Context) {
+	pol := h.plat.SecurityPolicy()
+	// WebSocket 不受 CORS 约束，浏览器同源策略拦不住跨站订阅，任意网页都能静默收到
+	// 全量种子数据（名称/下载路径/磁力链接/Peer 地址）。Sec-Fetch-Site 由浏览器强制写入、
+	// 页面脚本无法伪造，因此两种部署形态都先拒掉标记为跨站的握手。
+	if c.Request.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		respondError(c, http.StatusForbidden, "跨站 WebSocket 连接已被拒绝")
+		return
+	}
 	// 网关模式（AllowEmbedding）：宿主统一认证 + 服务仅本机 socket/回环可达，信任网关转发，
 	// 跳过 Origin 同源判定（网关改写的 Host / 缺失的 X-Forwarded-Host 会让 WS 误判跨域而 403）。
 	// 直连部署保持严格同源校验，防止任意网页静默订阅全量种子数据（名称/路径/磁力链接）。
-	if !h.plat.SecurityPolicy().AllowEmbedding {
-		if origin := c.Request.Header.Get("Origin"); origin != "" &&
-			!h.plat.SecurityPolicy().IsSameSiteOrigin(c.Request, origin) {
+	if !pol.AllowEmbedding {
+		if origin := c.Request.Header.Get("Origin"); origin != "" && !pol.IsSameSiteOrigin(c.Request, origin) {
 			respondError(c, http.StatusForbidden, "Origin 不被信任")
 			return
 		}
@@ -240,7 +253,7 @@ func (h *Hub) readPump(client *wsClient) {
 		h.unregister <- client
 		client.conn.Close()
 	}()
-	client.conn.SetReadLimit(512)
+	client.conn.SetReadLimit(4096)
 	_ = client.conn.SetReadDeadline(time.Now().Add(pongWait))
 	client.conn.SetPongHandler(func(string) error {
 		return client.conn.SetReadDeadline(time.Now().Add(pongWait))

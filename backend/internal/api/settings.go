@@ -31,6 +31,15 @@ func (h *Handler) updateSettings(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "Transmission 地址不能为空")
 		return
 	}
+	// 这些值会以 KEY=value 写入 .env.local 并被按行解析，含换行即等于注入新的配置键
+	for _, f := range []struct{ name, value string }{
+		{"地址", body.URL}, {"用户名", body.User}, {"密码", body.Pass},
+	} {
+		if err := config.ValidateEnvValue(f.name, f.value); err != nil {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	// 密码未提供时沿用现有凭据：前端出于安全不回显明文密码，
 	// 未修改密码直接保存时 body.Pass 为空，若用它重新探测会导致 502 认证失败

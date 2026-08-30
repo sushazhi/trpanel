@@ -35,7 +35,8 @@ func (c *Client) RawCall(ctx context.Context, method string, args map[string]any
 		if c.user != "" {
 			req.SetBasicAuth(c.user, c.pass)
 		}
-		return http.DefaultClient.Do(req)
+		// 复用 Client 自建的 HTTP 客户端：带整体超时与 TLS 版本下限，不使用全局 DefaultClient
+		return c.httpClient.Do(req)
 	}
 	c.sessionMu.Lock()
 	sid := c.sessionID
