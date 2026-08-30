@@ -102,7 +102,7 @@ iOS 27 beta 的方向保留「玻璃更透、用户可控」的无障碍降级�
 | # | 问题 | 修复 |
 | --- | --- | --- |
 | 1 | 绝大多数设置开关缺一行说明 | SettingsModal `Row` 增加 `hint`，约 34 个开关/选项补齐 `*Hint` 文案（zh/en） |
-| 2 | 控件 28px（排序胶囊、`h-7` 按钮、弹窗关闭钮） | 全站交互控件统一抬到 `h-8`/`w-8`（ListHeader、Settings、Detail、RSS、AutoMove、AddTorrent、Sidebar、TopBar、TagInput、ui/dialog 关闭钮 32px） |
+| 2 | 控件 28px（排序胶囊、`h-7` 按钮、弹窗关闭钮） | 全站交互控件统一抬到 `h-8`/`w-8`（ListHeader、Settings、Detail、AutoMove、AddTorrent、Sidebar、TopBar、TagInput、ui/dialog 关闭钮 32px） |
 | 3 | 硬编码文案 `['一'…'日']`、`Server n`、`Tier n`、`more/Auto` | 新增 `session.dayShort*`、`multiServer.server`、`detail.trackerTier`、`createTorrent.autoPiece/moreFiles/fileSummary` |
 | 4 | 双重模糊：玻璃弹窗内的 Select/子菜单 | 新增 `.glass-panel-solid` 实底材质，弹窗内下拉/子菜单全部换用；顶层浮层保持 `.glass-panel-strong` |
 | 5 | 详情页移动端是 Dialog；InfoGrid 手写背景；文件树展开钮过小 | 移动端改底部 Sheet（可下滑关闭）、InfoGrid 用 `.glass-subcard rounded-tile`、展开/重命名钮 28px+负边距扩至 ≥32px 命中区 |

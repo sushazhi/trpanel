@@ -244,27 +244,6 @@ export interface ServerInfo {
   enabled: boolean
 }
 
-// RSS 订阅源
-export interface RSSFeed {
-  id: string
-  name: string
-  url: string
-  intervalMin: number
-  enabled: boolean
-  downloadDir: string
-  labels: string[]
-  paused: boolean
-  minSizeMB: number
-  maxSizeMB: number
-  keywords: string[]
-  excludeWords: string[]
-  includeRegex: string
-  excludeRegex: string
-  lastFetchAt: number
-  lastError: string
-  processed: number
-}
-
 // 自动文件管理规则
 export interface AutoMoveRule {
   id: string
@@ -274,4 +253,57 @@ export interface AutoMoveRule {
   labels: string[]
   nameMatch: string
   targetDir: string
+}
+
+// 做种策略达标后的动作：暂停、删除（保留文件）、删除并连带删文件
+export type SeedPolicyAction = 'pause' | 'delete' | 'deleteData'
+
+// 做种策略规则：按站点 / 标签 / 名称圈定范围，达标条件全部满足后执行动作
+export interface SeedPolicyRule {
+  id: string
+  name: string
+  enabled: boolean
+  sites: string[]
+  labels: string[]
+  nameMatch: string
+  minRatio: number
+  minSeedDays: number
+  minUploadGB: number
+  action: SeedPolicyAction
+}
+
+// 做种策略全局安全保护，对所有规则生效
+export interface SeedPolicyGuard {
+  // enforce 关闭时引擎只写预览记录，不会真的暂停 / 删除种子
+  enforce: boolean
+  minSeedHours: number
+  excludeSites: string[]
+  excludeLabels: string[]
+}
+
+// 达标依据的结构化片段，界面按语言渲染成文案
+export interface SeedPolicyReasonPart {
+  kind: 'ratio' | 'days' | 'upload'
+  actual: number
+  target: number
+}
+
+// 做种策略执行记录
+export interface SeedPolicyLog {
+  time: number
+  rule: string
+  torrent: string
+  site: string
+  action: string
+  reason?: SeedPolicyReasonPart[]
+  dryRun: boolean
+}
+
+// 做种策略单轮执行统计
+export interface SeedPolicyResult {
+  matched: number
+  paused: number
+  deleted: number
+  previewed: number
+  failed: number
 }

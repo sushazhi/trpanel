@@ -1,4 +1,4 @@
-module github.com/transmission-manager/backend
+module github.com/trpanel/backend
 
 go 1.27.0
 

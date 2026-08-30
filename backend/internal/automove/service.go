@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/transmission-manager/backend/internal/rpc"
-	"github.com/transmission-manager/backend/internal/state"
+	"github.com/trpanel/backend/internal/rpc"
+	"github.com/trpanel/backend/internal/state"
 )
 
 // Service 自动文件管理：已完成种子按规则移动到目标目录

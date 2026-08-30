@@ -22,7 +22,7 @@ transmission/
 │   │   │   └── fnos/            # 飞牛 fnOS（网关集成 + fpk 更新）
 │   │   └── rpc/                 # Transmission RPC 封装 + 热更新管理
 │   ├── web/dist/                # 内嵌前端构建产物
-│   └── transmission-manager.exe # 已编译产物
+│   └── trpanel.exe # 已编译产物
 └── frontend/   # React + TypeScript 前端
     └── src/
         ├── platform/            # 宿主能力抽象（web / fnos）
@@ -38,8 +38,8 @@ transmission/
 - 本项目与 Transmission 网络互通（同机，或同一局域网 / 容器网络）。
 
 ### 1. 获取程序
-- 下载 Release 中的 `transmission-manager-*.zip`，解压到服务器目录即可使用；
-- 或自行构建：`cd backend && go build -o transmission-manager ./cmd/server`。
+- 下载 Release 中的 `trpanel-*.tar.gz`，解压到服务器目录即可使用；
+- 或自行构建：`cd backend && go build -o trpanel ./cmd/server`。
 
 ### 2. 配置连接
 任选其一（优先级：环境变量 > `.env.local` > `config.yaml` > 默认值）：
@@ -54,8 +54,8 @@ transmission/
 
 ### 3. 运行
 ```bash
-./transmission-manager        # Linux / macOS
-transmission-manager.exe      # Windows
+./trpanel        # Linux / macOS
+trpanel.exe      # Windows
 ```
 
 ### 4. 访问
@@ -67,7 +67,7 @@ transmission-manager.exe      # Windows
 cd frontend && pnpm install && pnpm build
 cd ../backend
 Copy-Item ..\frontend\dist\* web\dist\ -Recurse -Force   # PowerShell 将前端产物复制到 web/dist
-go build -o transmission-manager ./cmd/server
+go build -o trpanel ./cmd/server
 ```
 
 ## 本地开发（一键启动）
@@ -108,7 +108,7 @@ dev/
 ```
 
 > `dev/` 已在 `.gitignore` 中整体忽略，无需提交。
-> 后端数据目录通过环境变量 `TM_DATA_DIR` 指向 `dev/data`；生产部署不设置该变量时仍使用默认 `~/.transmission-manager`，二者互不影响。
+> 后端数据目录通过环境变量 `TM_DATA_DIR` 指向 `dev/data`；生产部署不设置该变量时仍使用默认 `~/.trpanel`，二者互不影响。
 
 ## 使用指南
 
@@ -125,10 +125,10 @@ dev/
 - 支持多文件、批量磁力，以及解析后立即校验。
 
 ### 日常管理
-- 选中：`Ctrl+A` 全选当前筛选结果，`Esc` 取消选择。
+- 选中：`Ctrl+A` 或顶栏动作条首颗「全选」按钮选中当前筛选结果，`Esc` 取消选择。
 - 操作：`Space` 开始 / 暂停，`Delete` 删除（弹窗含名称列表）。
 - 桌面端：拖拽行调整队列顺序；拖拽可伸缩侧边栏调宽（自动持久化）；表头右键管理列的显隐 / 顺序。
-- 移动端：点卡片打开详情，长按卡片或点 ⋮ 弹出操作菜单，列表区左右滑动切换分类，勾选卡片复选框进入批量操作（顶栏动作条可横向滑动），底部悬浮胶囊承载添加 / 全部启停 / 清理。
+- 移动端：点卡片打开详情，长按卡片或点 ⋮ 弹出操作菜单，列表区左右滑动切换分类，勾选卡片复选框进入批量操作（顶栏动作条可横向滑动，首颗「全选」一次补齐当前分组），底部悬浮胶囊承载添加 / 全部启停 / 清理。
 - 右键菜单：强制开始、队列调整、优先级、Tracker 批量替换、打开所在文件夹（飞牛环境）等。
 
 ### 过滤与排序
@@ -164,6 +164,7 @@ dev/
 - **Peer 地理位置**：将 `GeoLite2-City.mmdb` 放入 `backend/mmdb/` 后自动启用。
 - **浏览器内做种**：工具集「创建种子」可在本地用 bencode 分片 SHA1 生成 `.torrent`，生成后可一键添加。
 - **批量清理**：按分享率 / 做种时长过滤，批量清理已完成种子。
+- **做种策略**：「设置 → 自动化 → 做种策略」按站点设置分享率 / 做种天数 / 上传量目标，达标后自动暂停种子、删除种子（保留文件）或删除种子及文件，解决不同站点的分享率要求差异。默认只生成待处理清单，需手动开启「自动执行」才会真正动作；下载未完成、本地报错、所有 tracker 都没 announce 成功的种子一律跳过（站点没记录到你的上传量，本地分享率不算数），另有全局最低做种时长与站点 / 标签排除名单。
 
 ## 环境变量
 
@@ -191,12 +192,13 @@ dev/
 - 文件操作：文件树设优先级、重命名，自动重新校验
 - 实时数据：速度、进度、Peers（可选地理位置）、Tracker 状态、块位图
 - 筛选排序：状态 / 标签 / 站点 / 目录 / 搜索组合筛选，多级排序
-- 桌面（鼠标）虚拟滚动表格 + 右键菜单 / 拖拽排序；触屏与平板为玻璃卡片列表，长按或 ⋮ 唤出菜单、左右滑动切分类
+- 桌面（鼠标）虚拟滚动表格 + 右键菜单 / 拖拽排序；触屏与平板为玻璃卡片列表，长按或 ⋮ 唤出菜单、左右滑动切分类、动作条「全选」一次补齐当前分组
 - 会话设置：多服务器切换、全局限速、带宽定时调度、队列规则
 - 工具：批量清理已完成种子、浏览器端创建 `.torrent`
+- 自动化：已完成种子按站点归档、做种策略按站点分享率目标达标后暂停 / 删除 / 删除并清理文件
 - 速度历史图表与统计仪表盘
 - PWA：可安装、离线缓存、更新提示
-- 快捷键：`N` 添加 / `Space` 开始暂停 / `Delete` 删除 / `Ctrl+A` 全选 / `/` 搜索 / `Esc` 取消 / `Ctrl+=`、`Ctrl+-` 字号增减
+- 快捷键：`N` 添加 / `Space` 开始暂停 / `Delete` 删除 / `Ctrl+A` 全选当前结果（同动作条「全选」按钮）/ `/` 搜索 / `Esc` 取消 / `Ctrl+=`、`Ctrl+-` 字号增减
 - 明/暗主题，中/英文切换
 
 ## 测试验证

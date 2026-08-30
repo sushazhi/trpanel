@@ -5,7 +5,7 @@ import { client, request } from '@/api/client'
 import { APP_BASE } from '@/platform/appBase'
 import { serverApi, sessionApi, torrentApi, updateApi, type UpdateCheckResult, type UpdateStatus } from '@/api/torrent'
 import { AutoMoveManager } from '@/components/AutoMoveManager'
-import { RSSManager } from '@/components/RSSManager'
+import { SeedPolicyManager } from '@/components/SeedPolicyManager'
 import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
 import { toast } from '@/lib/toast'
@@ -406,8 +406,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   // 多服务器管理
   const [servers, setServers] = useState<ServerInfo[]>([])
   const [currentServerIndex, setCurrentServerIndex] = useState(0)
-  const [openRss, setOpenRss] = useState(false)
   const [openMove, setOpenMove] = useState(false)
+  const [openPolicy, setOpenPolicy] = useState(false)
 
   // session 仅用于「打开弹窗时」初始化 blocklist，通过 ref 读取，
   // 避免 session 变化（如 patchSession 回写）导致整个表单被重置
@@ -1002,14 +1002,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             )}
           </Section>
 
-          {/* RSS 订阅与自动文件管理入口 */}
+          {/* 自动化任务入口：自动文件管理 / 做种策略 */}
           <Section id="automation" title={t('session.automation')}>
             <div className="space-y-2">
-              <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenRss(true)}>
-                {t('rss.title')}
-              </Button>
               <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenMove(true)}>
                 {t('autoMove.title')}
+              </Button>
+              <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenPolicy(true)}>
+                {t('seedPolicy.title')}
               </Button>
             </div>
           </Section>
@@ -1023,8 +1023,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           <Button disabled={saving} onClick={save}>{saving ? t('common.loading') : t('common.confirm')}</Button>
         </DialogFooter>
       </DialogContent>
-      <RSSManager open={openRss} onClose={() => setOpenRss(false)} />
       <AutoMoveManager open={openMove} onClose={() => setOpenMove(false)} />
+      <SeedPolicyManager open={openPolicy} onClose={() => setOpenPolicy(false)} />
     </Dialog>
   )
 }

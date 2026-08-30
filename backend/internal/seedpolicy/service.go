@@ -1,0 +1,409 @@
+package seedpolicy
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/trpanel/backend/internal/rpc"
+	"github.com/trpanel/backend/internal/state"
+)
+
+const (
+	logLimit = 200
+	gibBytes = int64(1) << 30
+)
+
+// Service 做种策略引擎：按站点维度的分享率/做种时长目标，达标后暂停或删除种子
+type Service struct {
+	manager *rpc.Manager
+	store   *state.Store
+}
+
+// New 创建做种策略服务
+func New(manager *rpc.Manager, store *state.Store) *Service {
+	return &Service{manager: manager, store: store}
+}
+
+// Result 一轮执行的统计，供「立即执行」接口回显
+type Result struct {
+	Matched   int `json:"matched"`
+	Paused    int `json:"paused"`
+	Deleted   int `json:"deleted"`
+	Previewed int `json:"previewed"`
+	Failed    int `json:"failed"`
+}
+
+// planItem 一条已达标且通过保护栏的种子及其待执行动作
+type planItem struct {
+	torrent *rpc.Torrent
+	rule    *state.SeedPolicyRule
+	site    string
+	reason  []state.SeedPolicyReasonPart
+}
+
+// Run 后台循环
+func (s *Service) Run(ctx context.Context) {
+	slog.Info("做种策略服务已启动")
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		_, _ = s.Tick(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// Tick 执行一轮策略评估。列表接口已带 trackerStats，站点判定无需逐种拉详情。
+func (s *Service) Tick(ctx context.Context) (*Result, error) {
+	st := s.store.Get()
+	rules := enabledRules(st.SeedPolicyRules)
+	if len(rules) == 0 {
+		return &Result{}, nil
+	}
+	// 动作按 ID 批量下发，必须用最新列表：缓存里已被用户删掉的种子会让整批 RPC 失败
+	torrents, err := s.manager.Client().GetTorrentsFresh(ctx)
+	if err != nil {
+		slog.Warn("做种策略：获取种子列表失败", "err", err)
+		return nil, err
+	}
+	var plan []planItem
+	for _, t := range torrents {
+		if t == nil {
+			continue
+		}
+		item, ok := evaluate(&st, rules, t)
+		if !ok {
+			continue
+		}
+		if _, done := st.ProcessedPolicy[state.PolicyKey(item.rule.ID, t.HashString)]; done {
+			continue
+		}
+		plan = append(plan, item)
+	}
+	result := &Result{Matched: len(plan)}
+	if len(plan) == 0 {
+		return result, nil
+	}
+	if !st.SeedPolicyGuard.Enforce {
+		result.Previewed = len(plan)
+		s.persistPreview(plan)
+		return result, nil
+	}
+	s.execute(ctx, plan, result)
+	return result, nil
+}
+
+func enabledRules(all []state.SeedPolicyRule) []*state.SeedPolicyRule {
+	out := make([]*state.SeedPolicyRule, 0, len(all))
+	for i := range all {
+		if all[i].Enabled {
+			out = append(out, &all[i])
+		}
+	}
+	return out
+}
+
+// evaluate 依次套用保护栏与规则（按配置顺序命中第一条），返回待执行动作及达标依据
+func evaluate(st *state.State, rules []*state.SeedPolicyRule, t *rpc.Torrent) (planItem, bool) {
+	// 只处理下载完成的种子，否则会把做种目标误伤成下载中断
+	if !t.IsFinished {
+		return planItem{}, false
+	}
+	// 本地报错（多为文件缺失）时任何动作都可能放大损失
+	if t.Error != 0 {
+		return planItem{}, false
+	}
+	// announce 全部失败时站点侧并未记账，本地分享率不代表真实贡献
+	if trackerUnreachable(t) {
+		return planItem{}, false
+	}
+	guard := st.SeedPolicyGuard
+	if guard.MinSeedHours > 0 && float64(t.SecondsSeeding)/3600 < guard.MinSeedHours {
+		return planItem{}, false
+	}
+	sites := siteKeys(t)
+	if matchesAny(guard.ExcludeSites, sites) || matchesAny(guard.ExcludeLabels, t.Labels) {
+		return planItem{}, false
+	}
+	for _, r := range rules {
+		if reason, ok := reached(r, t); ok && matchesRuleScope(r, t, sites) {
+			return planItem{torrent: t, rule: r, site: primarySite(t), reason: reason}, true
+		}
+	}
+	return planItem{}, false
+}
+
+// matchesRuleScope 判断种子是否落在规则的站点 / 标签 / 名称范围内
+func matchesRuleScope(r *state.SeedPolicyRule, t *rpc.Torrent, sites []string) bool {
+	if r.NameMatch != "" && !strings.Contains(strings.ToLower(t.Name), strings.ToLower(r.NameMatch)) {
+		return false
+	}
+	if len(r.Labels) > 0 && !matchesAny(r.Labels, t.Labels) {
+		return false
+	}
+	if len(r.Sites) > 0 && !matchesAny(r.Sites, sites) {
+		return false
+	}
+	return true
+}
+
+// reached 判断达标条件：已配置的条件需全部满足，并返回结构化达标依据
+func reached(r *state.SeedPolicyRule, t *rpc.Torrent) ([]state.SeedPolicyReasonPart, bool) {
+	if r.MinRatio <= 0 && r.MinSeedDays <= 0 && r.MinUploadGB <= 0 {
+		return nil, false
+	}
+	var parts []state.SeedPolicyReasonPart
+	if r.MinRatio > 0 {
+		if t.UploadRatio < r.MinRatio {
+			return nil, false
+		}
+		parts = append(parts, state.SeedPolicyReasonPart{Kind: "ratio", Actual: t.UploadRatio, Target: r.MinRatio})
+	}
+	if r.MinSeedDays > 0 {
+		days := float64(t.SecondsSeeding) / 86400
+		if days < r.MinSeedDays {
+			return nil, false
+		}
+		parts = append(parts, state.SeedPolicyReasonPart{Kind: "days", Actual: days, Target: r.MinSeedDays})
+	}
+	if r.MinUploadGB > 0 {
+		upGB := float64(t.UploadedEver) / float64(gibBytes)
+		if upGB < r.MinUploadGB {
+			return nil, false
+		}
+		parts = append(parts, state.SeedPolicyReasonPart{Kind: "upload", Actual: upGB, Target: r.MinUploadGB})
+	}
+	return parts, true
+}
+
+// reasonText 服务端日志用的可读文本；界面侧由前端按语言自行渲染
+func reasonText(parts []state.SeedPolicyReasonPart) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		switch p.Kind {
+		case "days":
+			out = append(out, fmt.Sprintf("做种 %.1fd≥%.1fd", p.Actual, p.Target))
+		case "upload":
+			out = append(out, fmt.Sprintf("上传 %.1fGB≥%.1fGB", p.Actual, p.Target))
+		default:
+			out = append(out, fmt.Sprintf("分享率 %.2f≥%.2f", p.Actual, p.Target))
+		}
+	}
+	return strings.Join(out, "，")
+}
+
+// execute 按规则分组批量下发动作；失败项不落已处理标记，留待下轮重试
+func (s *Service) execute(ctx context.Context, plan []planItem, result *Result) {
+	byRule := make(map[string][]planItem)
+	for _, it := range plan {
+		byRule[it.rule.ID] = append(byRule[it.rule.ID], it)
+	}
+	ids := make([]int64, 0, len(plan))
+	for _, items := range byRule {
+		rule := items[0].rule
+		ids = ids[:0]
+		for _, it := range items {
+			ids = append(ids, it.torrent.ID)
+		}
+		pause := rule.Action == state.PolicyActionPause
+		var err error
+		if pause {
+			err = s.manager.Client().StopTorrents(ctx, ids)
+		} else {
+			err = s.manager.Client().RemoveTorrents(ctx, ids, rule.Action == state.PolicyActionDeleteData)
+		}
+		if err != nil {
+			result.Failed += len(items)
+			slog.Warn("做种策略：动作失败", "rule", rule.Name, "action", rule.Action, "err", err)
+			continue
+		}
+		if pause {
+			result.Paused += len(items)
+		} else {
+			result.Deleted += len(items)
+		}
+		s.record(items, false)
+	}
+	if result.Paused+result.Deleted > 0 {
+		slog.Info("做种策略执行完成", "paused", result.Paused, "deleted", result.Deleted)
+	}
+}
+
+// record 写入已处理标记与执行记录
+func (s *Service) record(items []planItem, dryRun bool) {
+	if len(items) == 0 {
+		return
+	}
+	now := state.NowUnix()
+	logs := make([]state.SeedPolicyLog, 0, len(items))
+	for _, it := range items {
+		logs = append(logs, state.SeedPolicyLog{
+			Time:    now,
+			Rule:    it.rule.Name,
+			Torrent: it.torrent.Name,
+			Site:    it.site,
+			Action:  it.rule.Action,
+			Reason:  it.reason,
+			DryRun:  dryRun,
+		})
+		// 命令行部署看不到界面，删除/暂停必须能从 journal 里追溯原因
+		slog.Info("做种策略", "rule", it.rule.Name, "action", it.rule.Action, "torrent", it.torrent.Name,
+			"site", it.site, "reason", reasonText(it.reason), "dryRun", dryRun)
+	}
+	_ = s.store.Update(func(st *state.State) {
+		for _, it := range items {
+			st.ProcessedPolicy[state.PolicyKey(it.rule.ID, it.torrent.HashString)] = strconv.FormatInt(now, 10)
+		}
+		st.SeedPolicyLogs = appendLogs(st.SeedPolicyLogs, logs, dryRun)
+	})
+}
+
+// persistPreview 预览只刷新待办清单，不落已处理标记。
+// 未开启自动执行时每分钟都会评估一轮，清单未变则不写盘。
+func (s *Service) persistPreview(plan []planItem) {
+	now := state.NowUnix()
+	logs := make([]state.SeedPolicyLog, 0, len(plan))
+	for _, it := range plan {
+		logs = append(logs, state.SeedPolicyLog{
+			Time:    now,
+			Rule:    it.rule.Name,
+			Torrent: it.torrent.Name,
+			Site:    it.site,
+			Action:  it.rule.Action,
+			Reason:  it.reason,
+			DryRun:  true,
+		})
+	}
+	if previewEqual(s.store.Get().SeedPolicyLogs, logs) {
+		return
+	}
+	_ = s.store.Update(func(st *state.State) {
+		st.SeedPolicyLogs = appendLogs(st.SeedPolicyLogs, logs, true)
+	})
+}
+
+// previewEqual 比对待办清单是否变化，忽略写入时间
+func previewEqual(old, added []state.SeedPolicyLog) bool {
+	var cur []state.SeedPolicyLog
+	for _, l := range old {
+		if l.DryRun {
+			cur = append(cur, l)
+		}
+	}
+	if len(cur) != len(added) {
+		return false
+	}
+	for i := range cur {
+		if !sameLog(cur[i], added[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameLog 比较两条记录（Reason 为切片，结构体不能再直接用 ==）
+func sameLog(a, b state.SeedPolicyLog) bool {
+	if a.Rule != b.Rule || a.Torrent != b.Torrent || a.Site != b.Site || a.Action != b.Action || a.DryRun != b.DryRun {
+		return false
+	}
+	if len(a.Reason) != len(b.Reason) {
+		return false
+	}
+	for i := range a.Reason {
+		if a.Reason[i] != b.Reason[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// appendLogs 新记录置于头部并截断；预览记录只保留最新一批，避免每分钟重复刷屏
+func appendLogs(old, added []state.SeedPolicyLog, replacePreview bool) []state.SeedPolicyLog {
+	kept := make([]state.SeedPolicyLog, 0, len(old))
+	for _, l := range old {
+		if !replacePreview || !l.DryRun {
+			kept = append(kept, l)
+		}
+	}
+	out := make([]state.SeedPolicyLog, 0, len(added)+len(kept))
+	out = append(out, added...)
+	out = append(out, kept...)
+	if len(out) > logLimit {
+		out = out[:logLimit]
+	}
+	return out
+}
+
+// siteKeys 返回种子用于规则匹配的 tracker 标识（主机名与 announce 地址）
+func siteKeys(t *rpc.Torrent) []string {
+	seen := make(map[string]struct{}, len(t.TrackerStats))
+	out := make([]string, 0, len(t.TrackerStats))
+	for _, ts := range t.TrackerStats {
+		for _, v := range []string{ts.Host, ts.Announce} {
+			if v == "" {
+				continue
+			}
+			if _, ok := seen[v]; ok {
+				continue
+			}
+			seen[v] = struct{}{}
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// primarySite 取主 tracker 主机名，仅用于执行记录展示
+func primarySite(t *rpc.Torrent) string {
+	for _, ts := range t.TrackerStats {
+		if !ts.IsBackup && ts.Host != "" {
+			return ts.Host
+		}
+	}
+	if len(t.TrackerStats) > 0 {
+		return t.TrackerStats[0].Host
+	}
+	return ""
+}
+
+// trackerUnreachable 所有非备用 tracker 都没有成功 announce 过（判定口径与详情面板一致：
+// 有过 announce 时间但未成功即视为失败），此时站点侧很可能没记录到上传贡献
+func trackerUnreachable(t *rpc.Torrent) bool {
+	attempted := false
+	for _, ts := range t.TrackerStats {
+		if ts.IsBackup {
+			continue
+		}
+		if ts.LastAnnounceSucceeded {
+			return false
+		}
+		if ts.LastAnnounceTime > 0 {
+			attempted = true
+		}
+	}
+	return attempted
+}
+
+// matchesAny 双向子串匹配：规则里写站点简称（如 m-team）也能命中完整 tracker 主机名
+func matchesAny(needles, haystack []string) bool {
+	for _, n := range needles {
+		nn := strings.ToLower(strings.TrimSpace(n))
+		if nn == "" {
+			continue
+		}
+		for _, h := range haystack {
+			hh := strings.ToLower(h)
+			if nn == hh || strings.Contains(hh, nn) || strings.Contains(nn, hh) {
+				return true
+			}
+		}
+	}
+	return false
+}

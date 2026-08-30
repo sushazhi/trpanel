@@ -7,7 +7,7 @@ package fnos
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/transmission-manager/backend/internal/platform"
+	"github.com/trpanel/backend/internal/platform"
 )
 
 // ID 平台标识

@@ -19,17 +19,17 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	static "github.com/transmission-manager/backend"
-	"github.com/transmission-manager/backend/internal/api"
-	"github.com/transmission-manager/backend/internal/automove"
-	"github.com/transmission-manager/backend/internal/config"
-	"github.com/transmission-manager/backend/internal/middleware"
-	"github.com/transmission-manager/backend/internal/platform"
+	static "github.com/trpanel/backend"
+	"github.com/trpanel/backend/internal/api"
+	"github.com/trpanel/backend/internal/automove"
+	"github.com/trpanel/backend/internal/config"
+	"github.com/trpanel/backend/internal/middleware"
+	"github.com/trpanel/backend/internal/platform"
 	// 空导入即完成 fnOS 平台注册；不导入时服务自动降级为通用部署
-	_ "github.com/transmission-manager/backend/internal/platform/fnos"
-	"github.com/transmission-manager/backend/internal/rpc"
-	"github.com/transmission-manager/backend/internal/rss"
-	"github.com/transmission-manager/backend/internal/state"
+	_ "github.com/trpanel/backend/internal/platform/fnos"
+	"github.com/trpanel/backend/internal/rpc"
+	"github.com/trpanel/backend/internal/seedpolicy"
+	"github.com/trpanel/backend/internal/state"
 )
 
 func main() {
@@ -83,7 +83,7 @@ func main() {
 	// GeoIP 服务（mmdb 文件缺失时自动降级为空查询）
 	geo := api.NewGeoService("mmdb/GeoLite2-City.mmdb")
 
-	// 持久化状态（多服务器/RSS/自动文件管理）
+	// 持久化状态（多服务器/自动文件管理/做种策略）
 	store, err := state.Load(state.DefaultStatePath(cfg.DataDir))
 	if err != nil {
 		slog.Error("加载状态文件失败", "err", err)
@@ -92,13 +92,13 @@ func main() {
 
 	// 注册 API 与 WebSocket
 	hub := api.NewHub(manager, cfg.PollInterval, plat)
-	rssSvc := rss.New(manager, store)
 	moveSvc := automove.New(manager, store)
-	handler := api.NewHandler(manager, hub, geo, store, rssSvc, moveSvc, cfg, plat)
+	policySvc := seedpolicy.New(manager, store)
+	handler := api.NewHandler(manager, hub, geo, store, moveSvc, policySvc, cfg, plat)
 	handler.Register(r, gatewayPrefix)
 	hub.Start(ctx)
-	go rssSvc.Run(ctx)
 	go moveSvc.Run(ctx)
+	go policySvc.Run(ctx)
 
 	// 内嵌前端静态资源（SPA）
 	serveStatic(r, plat.GatewayPrefix())
@@ -159,7 +159,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	slog.Info("正在关闭服务...")
-	// 通知后台任务停止（WS 轮询 / RSS 订阅 / 自动文件管理）
+	// 通知后台任务停止（WS 轮询 / 自动文件管理 / 做种策略）
 	cancelCtx()
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()

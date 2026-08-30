@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	trpc "github.com/hekmon/transmissionrpc/v3"
-	"github.com/transmission-manager/backend/internal/models"
+	"github.com/trpanel/backend/internal/models"
 )
 
 // getSession 获取会话配置

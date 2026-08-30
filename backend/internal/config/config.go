@@ -32,7 +32,7 @@ func Load() (*Config, error) {
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(".")
-	v.AddConfigPath("$HOME/.transmission-manager")
+	v.AddConfigPath("$HOME/.trpanel")
 
 	// 默认值
 	v.SetDefault("tr_url", "http://localhost:9091/transmission/rpc")
@@ -137,11 +137,11 @@ func expandList(items []string) []string {
 	return out
 }
 
-// defaultDataDir 默认数据目录为 ~/.transmission-manager（与 config.yaml 搜索路径一致），
+// defaultDataDir 默认数据目录为 ~/.trpanel（与 config.yaml 搜索路径一致），
 // 避免运行时生成的状态/配置文件落在代码或部署目录
 func defaultDataDir() string {
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".transmission-manager")
+		return filepath.Join(home, ".trpanel")
 	}
 	return "."
 }

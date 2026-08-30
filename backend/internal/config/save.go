@@ -21,7 +21,7 @@ func ValidateEnvValue(name, value string) error {
 	return nil
 }
 
-// SaveConnection 将界面配置的连接保存到数据目录（默认 ~/.transmission-manager）
+// SaveConnection 将界面配置的连接保存到数据目录（默认 ~/.trpanel）
 func SaveConnection(dataDir, transmissionURL, user, pass, pollInterval string) error {
 	for _, f := range []struct{ name, value string }{
 		{"TR_URL", transmissionURL},

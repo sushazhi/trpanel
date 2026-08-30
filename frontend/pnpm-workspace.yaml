@@ -1,0 +1,6 @@
+# pnpm 10+ 起，原先 package.json 里的 "pnpm" 字段改到这里配置。
+# pnpm 11 用 allowBuilds 取代 onlyBuiltDependencies：
+# 只有列出的依赖才允许执行构建/安装脚本（pnpm 默认拦截），
+# esbuild 需要它来落平台二进制。
+allowBuilds:
+  esbuild: true

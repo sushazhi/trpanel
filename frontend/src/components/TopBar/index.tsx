@@ -14,6 +14,8 @@ import {
   RotateCcw,
   Search,
   Settings,
+  SquareCheck,
+  SquareX,
   Tags,
   Trash2,
 } from 'lucide-react'
@@ -37,6 +39,7 @@ interface Props {
   onOpenAdd: () => void
   onOpenDashboard: () => void
   onOpenLabels: () => void
+  filteredIds: number[]
   isMobile?: boolean
   onOpenDrawer?: () => void
 }
@@ -83,13 +86,14 @@ const THEME_PRESETS: { id: string; from: string; to: string }[] = [
 ]
 
 // 玻璃悬浮顶栏：单行 —— Logo + 搜索 + 批量操作（选中时出现在同行）+ 排序/视图/刷新 + 添加 + 头像
-export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashboard, onOpenLabels, isMobile, onOpenDrawer }) => {
+export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashboard, onOpenLabels, filteredIds, isMobile, onOpenDrawer }) => {
   const { t } = useTranslation()
   const search = useAppStore((s) => s.filters.search)
   const filters = useAppStore((s) => s.filters)
   const setFilters = useAppStore((s) => s.setFilters)
   const selectedIds = useAppStore((s) => s.selectedIds)
   const clearSelection = useAppStore((s) => s.clearSelection)
+  const setSelection = useAppStore((s) => s.setSelection)
   const session = useAppStore((s) => s.session)
   const theme = useAppStore((s) => s.theme)
   const themePreset = useAppStore((s) => s.themePreset)
@@ -123,6 +127,23 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
     setFilters({ status: ['all'], sites: [], downloadDirs: [], labels: [], error: [], search: '' })
   }
 
+  // 触屏既没有 Ctrl+A 也没有 Shift 连选，这颗按钮是手机端唯一的分组批量入口
+  const allFilteredSelected = useMemo(() => {
+    if (filteredIds.length === 0) return false
+    const selected = new Set(selectedIds)
+    return filteredIds.every((id) => selected.has(id))
+  }, [filteredIds, selectedIds])
+
+  const toggleSelectAll = () => {
+    if (!allFilteredSelected) {
+      setSelection(filteredIds)
+      return
+    }
+    // 只摘掉可见部分：换筛选条件前选中的种子仍在选区里，静默清空会让用户丢掉看不见的选择
+    const visible = new Set(filteredIds)
+    setSelection(selectedIds.filter((id) => !visible.has(id)))
+  }
+
   // 宿主快捷操作：打开下载目录 / 选取配置目录（无宿主能力时复制路径兜底）
   const openDownloadDir = async () => {
     const dir = session?.downloadDir
@@ -131,12 +152,10 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   }
   const configDir = async () => {
     const picked = await pickFolder()
-    if (picked) {
-      navigator.clipboard?.writeText(picked).catch(() => {})
-      toast.success(t('sidebar.dirCopied', { dir: picked }))
-    } else {
-      toast.info(t('sidebar.configDirHint'))
-    }
+    // 取消或宿主没返回：与设置面板、种子菜单的选择器一致，不打扰
+    if (!picked) return
+    navigator.clipboard?.writeText(picked).catch(() => {})
+    toast.success(t('sidebar.dirCopied', { dir: picked }))
   }
 
   // 搜索框是压扁而非卸载，光标否则会留在看不见的输入框里
@@ -220,6 +239,16 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
         {hasSelection && (
           <div className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex items-center gap-0.5 w-max">
+              <ToolBtn
+                icon={allFilteredSelected ? SquareX : SquareCheck}
+                large={isMobile}
+                title={t(allFilteredSelected ? 'topbar.deselectAllFiltered' : 'topbar.selectAllFiltered', { n: filteredIds.length })}
+                disabled={busy || filteredIds.length === 0}
+                onClick={toggleSelectAll}
+              />
+
+              <span className="w-px h-5 bg-gray-200 dark:bg-white/10 mx-1 shrink-0" aria-hidden />
+
               <ToolBtn icon={Play} large={isMobile} title={t('action.start')} disabled={busy} onClick={() => void actions.start(selectedIds)} />
               <ToolBtn icon={Pause} large={isMobile} title={t('action.stop')} disabled={busy} onClick={() => void actions.stop(selectedIds)} />
               <ToolBtn icon={Trash2} large={isMobile} title={t('action.remove')} danger disabled={busy} onClick={() => setRemoveOpen(true)} />

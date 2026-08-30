@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/transmission-manager/backend/internal/config"
-	"github.com/transmission-manager/backend/internal/state"
+	"github.com/trpanel/backend/internal/config"
+	"github.com/trpanel/backend/internal/state"
 )
 
 // listServers 获取服务器列表（脱敏密码）

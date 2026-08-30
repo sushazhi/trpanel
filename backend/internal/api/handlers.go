@@ -4,42 +4,42 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/transmission-manager/backend/internal/automove"
-	"github.com/transmission-manager/backend/internal/config"
-	"github.com/transmission-manager/backend/internal/middleware"
-	"github.com/transmission-manager/backend/internal/models"
-	"github.com/transmission-manager/backend/internal/platform"
-	"github.com/transmission-manager/backend/internal/rpc"
-	"github.com/transmission-manager/backend/internal/rss"
-	"github.com/transmission-manager/backend/internal/state"
+	"github.com/trpanel/backend/internal/automove"
+	"github.com/trpanel/backend/internal/config"
+	"github.com/trpanel/backend/internal/middleware"
+	"github.com/trpanel/backend/internal/models"
+	"github.com/trpanel/backend/internal/platform"
+	"github.com/trpanel/backend/internal/rpc"
+	"github.com/trpanel/backend/internal/seedpolicy"
+	"github.com/trpanel/backend/internal/state"
 )
 
 // Handler API 处理器
 type Handler struct {
-	rpc      *rpc.Manager
-	hub      *Hub
-	geo      *GeoService
-	state    *state.Store
-	rss      *rss.Service
-	automove *automove.Service
-	plat     platform.Platform
-	dataDir  string
-	apiToken string
+	rpc        *rpc.Manager
+	hub        *Hub
+	geo        *GeoService
+	state      *state.Store
+	automove   *automove.Service
+	seedpolicy *seedpolicy.Service
+	plat       platform.Platform
+	dataDir    string
+	apiToken   string
 }
 
 // NewHandler 创建处理器。
 // plat 提供宿主平台能力：本地文件读取白名单、同源判定策略、宿主专属路由（如 fnOS 应用更新）。
-func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, rssSvc *rss.Service, moveSvc *automove.Service, cfg *config.Config, plat platform.Platform) *Handler {
+func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, moveSvc *automove.Service, policySvc *seedpolicy.Service, cfg *config.Config, plat platform.Platform) *Handler {
 	return &Handler{
-		rpc:      manager,
-		hub:      hub,
-		geo:      geo,
-		state:    st,
-		rss:      rssSvc,
-		automove: moveSvc,
-		plat:     plat,
-		dataDir:  cfg.DataDir,
-		apiToken: cfg.APIToken,
+		rpc:        manager,
+		hub:        hub,
+		geo:        geo,
+		state:      st,
+		automove:   moveSvc,
+		seedpolicy: policySvc,
+		plat:       plat,
+		dataDir:    cfg.DataDir,
+		apiToken:   cfg.APIToken,
 	}
 }
 
@@ -99,16 +99,19 @@ func (h *Handler) Register(r *gin.Engine, prefix string) {
 		api.POST("/servers", h.saveServers)
 		api.DELETE("/servers/:index", h.deleteServer)
 		api.POST("/servers/switch", h.switchServer)
-		// RSS 订阅
-		api.GET("/rss", h.listRSSFeeds)
-		api.POST("/rss", h.saveRSSFeed)
-		api.DELETE("/rss/:id", h.deleteRSSFeed)
-		api.POST("/rss/:id/fetch", h.fetchRSS)
 		// 自动文件管理
 		api.GET("/automove", h.listAutoMoveRules)
 		api.POST("/automove", h.saveAutoMoveRule)
 		api.DELETE("/automove/:id", h.deleteAutoMoveRule)
 		api.POST("/automove/run", h.runAutoMove)
+		// 做种策略（按站点的分享率目标与达标动作）
+		api.GET("/seedpolicy", h.listSeedPolicy)
+		api.POST("/seedpolicy", h.saveSeedPolicyRule)
+		api.DELETE("/seedpolicy/:id", h.deleteSeedPolicyRule)
+		api.POST("/seedpolicy/guard", h.saveSeedPolicyGuard)
+		api.POST("/seedpolicy/run", h.runSeedPolicy)
+		api.POST("/seedpolicy/reset", h.resetSeedPolicy)
+		api.POST("/seedpolicy/clear-logs", h.clearSeedPolicyLogs)
 		// Peer 地理位置
 		api.POST("/peers/geo", h.lookupPeers)
 		// 系统命令

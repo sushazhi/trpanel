@@ -30,7 +30,7 @@ export function TagInput({
     }
   }
 
-  const shownSuggestions = focused && suggestions ? suggestions.filter((s) => !value.includes(s) && s.toLowerCase().includes(text.toLowerCase())).slice(0, 6) : []
+  const shownSuggestions = focused && suggestions ? suggestions.filter((s) => !value.includes(s) && s.toLowerCase().includes(text.toLowerCase())).slice(0, 200) : []
 
   return (
     <div
@@ -70,7 +70,7 @@ export function TagInput({
         className="flex-1 min-w-24 h-8 border-0 bg-transparent px-1 text-body shadow-none focus-visible:ring-0 focus-visible:outline-none"
       />
       {shownSuggestions.length > 0 && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-20 rounded-md border border-input bg-popover shadow-lg overflow-hidden">
+        <div className="absolute left-0 right-0 top-full mt-1 z-20 rounded-md border border-input bg-popover shadow-lg max-h-56 overflow-y-auto overscroll-contain">
           {shownSuggestions.map((s) => (
             <button
               key={s}

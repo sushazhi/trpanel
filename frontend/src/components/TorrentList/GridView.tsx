@@ -118,6 +118,8 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
           const dot = { color: statusColor(torrent), pulse: statusPulses(torrent) }
           const labels = torrent.labels ?? []
           const eta = torrent.eta > 0 ? `${t('card.remaining')} ${formatEtaShort(torrent.eta)}` : ''
+          // 已下载大小 = 种子文件里实际持有的字节（含未校验部分）；只下载了一部分就只显示这部分
+          const downloadedSize = formatBytes(Math.min(torrent.haveValid + torrent.haveUnchecked, torrent.totalSize))
           // 已完成（含做种中/暂停）：显示分享率；未完成：显示「已下载 / 总大小」
           const isDone = torrent.percentDone >= 1
           const seedingFor =
@@ -206,38 +208,24 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                     )}
                   </div>
 
-                  {/* 元信息：拆成两个不换行分组，窄屏「做种时长」独占一行。
-                      整行 flex-wrap 时换行点由每张卡片的字数决定，同样做种的卡片会切在不同位置 */}
-                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-footnote text-gray-500 dark:text-gray-400 mt-1.5">
-                    <span className="flex min-w-0 flex-1 items-center gap-2.5 sm:flex-none">
-                      <span className="tm-mono shrink-0 text-green-600 dark:text-green-400">↓{formatSpeed(torrent.rateDownload)}</span>
-                      <span className="tm-mono shrink-0 text-blue-600 dark:text-blue-400">↑{formatSpeed(torrent.rateUpload)}</span>
-                      {eta && (
-                        <>
-                          <Sep />
-                          <span className="shrink-0">{eta}</span>
-                        </>
-                      )}
-                      <Sep />
-                      {/* 未完成：已下载 / 总大小；已完成：分享率（宽屏补充总大小） */}
-                      {isDone ? (
-                        <>
-                          <span className="tm-mono shrink-0">{t('columns.ratio')} {formatRatio(torrent.uploadRatio)}</span>
-                          <Sep className="hidden sm:inline" />
-                          <span className="hidden sm:inline">{formatBytes(torrent.totalSize)}</span>
-                        </>
-                      ) : (
-                        <span className="tm-mono min-w-0 truncate">
-                          {formatBytes(torrent.downloadedEver)} / {formatBytes(torrent.totalSize)}
-                        </span>
-                      )}
-                    </span>
+                  {/* 元信息：已下载大小 / 下行 / 上行 / 分享率 / 做种时长 同行，自适应宽度，不换行 */}
+                  <div className="flex flex-nowrap items-center gap-x-2.5 text-footnote text-gray-500 dark:text-gray-400 mt-1.5 min-w-0 overflow-hidden">
+                    <span className="tm-mono shrink-0">{downloadedSize}</span>
+                    <span className="tm-mono shrink-0 text-green-600 dark:text-green-400">↓{formatSpeed(torrent.rateDownload)}</span>
+                    <span className="tm-mono shrink-0 text-blue-600 dark:text-blue-400">↑{formatSpeed(torrent.rateUpload)}</span>
+                    <Sep />
+                    <span className="tm-mono shrink-0">{t('columns.ratio')} {formatRatio(torrent.uploadRatio)}</span>
                     {seedingFor && (
-                      <span className="flex w-full min-w-0 items-center gap-2.5 sm:w-auto">
-                        {/* 与上一行同排时才需要连接点 */}
-                        <Sep className="hidden sm:inline" />
-                        <span className="truncate text-gray-400 dark:text-gray-500">{seedingFor}</span>
-                      </span>
+                      <>
+                        <Sep />
+                        <span className="shrink-0 text-gray-400 dark:text-gray-500">{seedingFor}</span>
+                      </>
+                    )}
+                    {eta && (
+                      <>
+                        <Sep />
+                        <span className="shrink-0 truncate">{eta}</span>
+                      </>
                     )}
                   </div>
                 </div>

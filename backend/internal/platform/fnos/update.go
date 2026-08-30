@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/transmission-manager/backend/internal/models"
+	"github.com/trpanel/backend/internal/models"
 )
 
 // fnOS 应用更新：GitHub Release 检测最新版 + gh-proxy 回退下载 fpk 包

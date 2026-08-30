@@ -12,8 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/transmission-manager/backend/internal/platform"
-	"github.com/transmission-manager/backend/internal/rpc"
+	"github.com/trpanel/backend/internal/platform"
+	"github.com/trpanel/backend/internal/rpc"
 )
 
 const (

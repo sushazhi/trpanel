@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import TagInput from '@/components/TagInput'
 
 const emptyRule = (): AutoMoveRule => ({
   id: '',
@@ -148,11 +149,9 @@ export function AutoMoveManager({ open, onClose }: { open: boolean; onClose: () 
               <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder={t('autoMove.ruleName')} className="h-8 text-footnote" />
               <Input value={editing.nameMatch} onChange={(e) => setEditing({ ...editing, nameMatch: e.target.value })} placeholder={t('autoMove.nameMatchPlaceholder')} className="h-8 text-footnote" />
               <div className="grid grid-cols-2 gap-2">
-                <Input value={editing.labels.join(', ')} onChange={(e) => setEditing({ ...editing, labels: e.target.value.split(/[,，]/) })} placeholder={`${t('autoMove.labels')} (${t('common.eachLineOne')})`} list="am-labels" className="h-8 text-footnote" />
-                <Input value={editing.sites.join(', ')} onChange={(e) => setEditing({ ...editing, sites: e.target.value.split(/[,，]/) })} placeholder={t('autoMove.sites')} list="am-sites" className="h-8 text-footnote" />
+                <TagInput value={editing.labels} onChange={(v) => setEditing({ ...editing, labels: v })} suggestions={allLabels} placeholder={t('autoMove.labels')} className="text-footnote" />
+                <TagInput value={editing.sites} onChange={(v) => setEditing({ ...editing, sites: v })} suggestions={allSites} placeholder={t('autoMove.sites')} className="text-footnote" />
               </div>
-              <datalist id="am-labels">{allLabels.map((l) => <option key={l} value={l} />)}</datalist>
-              <datalist id="am-sites">{allSites.map((s) => <option key={s} value={s} />)}</datalist>
               <Input value={editing.targetDir} onChange={(e) => setEditing({ ...editing, targetDir: e.target.value })} placeholder={t('autoMove.targetDir')} className="h-8 text-footnote" />
               <div className={row}>
                 <span className={label}>{t('common.enabled')}</span>

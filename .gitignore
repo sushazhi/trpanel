@@ -8,8 +8,8 @@ frontend/package-lock.json
 # ===== Go 后端构建产物 =====
 backend/web/dist/
 backend/server.exe
-backend/transmission-manager
-backend/transmission-manager.exe
+backend/trpanel
+backend/trpanel.exe
 
 # ===== 开发服务器运行时产物（统一目录 dev/） =====
 dev/
@@ -34,4 +34,4 @@ tm-state.json
 # ===== OS =====
 .DS_Store
 Thumbs.db
-backend/transmission-manager-linux-arm64
+backend/trpanel-linux-arm64

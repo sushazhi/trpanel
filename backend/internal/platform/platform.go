@@ -1,7 +1,7 @@
 // Package platform 把「部署环境相关的能力」从核心业务中剥离，
 // 使本项目既能作为飞牛 fnOS 应用运行，也能直接跑在 Docker / 物理机 / 任意 Linux 上。
 //
-// 核心业务（RPC、RSS、自动文件管理、WebSocket 等）只依赖本包定义的接口，
+// 核心业务（RPC、自动文件管理、做种策略、WebSocket 等）只依赖本包定义的接口，
 // 具体宿主在子包中实现接口并通过 Register 注册；未注册的平台一律回退到
 // 最小权限的通用实现（generic），新增一套宿主不需要改动任何业务代码。
 package platform

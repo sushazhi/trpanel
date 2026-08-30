@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/transmission-manager/backend/internal/platform"
+	"github.com/trpanel/backend/internal/platform"
 )
 
 // respondForbidden 拒绝跨站/未授权写操作

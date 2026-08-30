@@ -138,6 +138,7 @@ export default function App() {
   useEffect(() => {
     filteredRef.current = filtered
   }, [filtered])
+  const filteredIds = useMemo(() => filtered.map((x) => x.id), [filtered])
   const allLabels = useMemo(
     () => Array.from(new Set(torrents.flatMap((x) => x.labels ?? []))).sort((a, b) => a.localeCompare(b, 'zh')),
     [torrents],
@@ -332,6 +333,7 @@ export default function App() {
             setBatchLabels(first?.labels ?? [])
             setLabelModalOpen(true)
           }}
+          filteredIds={filteredIds}
         />
         {/* 分类标题行仅移动端保留（桌面端排序/视图/刷新已并入顶栏） */}
         {isMobile && <ListHeader count={filtered.length} isMobile onOpenDashboard={() => setDashboardOpen(true)} />}

@@ -1,5 +1,5 @@
 import { client, request } from './client'
-import type { AutoMoveRule, RSSFeed, ServerInfo, Session, SessionStats, SessionStatus, Torrent } from '@/types'
+import type { AutoMoveRule, SeedPolicyGuard, SeedPolicyLog, SeedPolicyResult, SeedPolicyRule, ServerInfo, Session, SessionStats, SessionStatus, Torrent } from '@/types'
 
 // 种子相关接口
 export const torrentApi = {
@@ -95,20 +95,23 @@ export const serverApi = {
   switch: (index: number) => request<{ index: number; version: string }>(client.post('/servers/switch', { index })),
 }
 
-// RSS 订阅
-export const rssApi = {
-  list: () => request<{ feeds: RSSFeed[] }>(client.get('/rss')),
-  save: (feed: RSSFeed) => request<{ id: string }>(client.post('/rss', feed)),
-  remove: (id: string) => request(client.delete(`/rss/${id}`)),
-  fetch: (id: string) => request(client.post(`/rss/${id}/fetch`)),
-}
-
 // 自动文件管理
 export const autoMoveApi = {
   list: () => request<{ rules: AutoMoveRule[] }>(client.get('/automove')),
   save: (rule: AutoMoveRule) => request<{ id: string }>(client.post('/automove', rule)),
   remove: (id: string) => request(client.delete(`/automove/${id}`)),
   run: () => request(client.post('/automove/run')),
+}
+
+// 做种策略：按站点的分享率 / 做种时长目标与达标动作
+export const seedPolicyApi = {
+  list: () => request<{ rules: SeedPolicyRule[]; guard: SeedPolicyGuard; logs: SeedPolicyLog[] }>(client.get('/seedpolicy')),
+  save: (rule: SeedPolicyRule) => request<{ id: string }>(client.post('/seedpolicy', rule)),
+  remove: (id: string) => request(client.delete(`/seedpolicy/${id}`)),
+  saveGuard: (guard: SeedPolicyGuard) => request<{ saved: boolean }>(client.post('/seedpolicy/guard', guard)),
+  run: () => request<{ result: SeedPolicyResult; at: number }>(client.post('/seedpolicy/run')),
+  reset: () => request<{ cleared: number }>(client.post('/seedpolicy/reset')),
+  clearLogs: () => request<{ cleared: boolean }>(client.post('/seedpolicy/clear-logs')),
 }
 
 // 检查更新（飞牛部署：后端查 GitHub Releases，gh-proxy 回退下载 fpk 更新包）

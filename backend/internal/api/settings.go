@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/transmission-manager/backend/internal/config"
-	"github.com/transmission-manager/backend/internal/rpc"
+	"github.com/trpanel/backend/internal/config"
+	"github.com/trpanel/backend/internal/rpc"
 )
 
 // getSettings 获取当前连接配置（不返回明文密码）
