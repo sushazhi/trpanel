@@ -105,7 +105,8 @@ export function AutoMoveManager({ open, onClose }: { open: boolean; onClose: () 
         <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
           <DialogTitle>{t('autoMove.title')}</DialogTitle>
         </DialogHeader>
-        <div className="overflow-y-auto px-4 py-3 space-y-3">
+        {/* flex-1 min-h-0：同做种策略面板，防止内容撑破固定高度后滚动失效 */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
           {/* 规则列表 */}
           <div className="space-y-2">
             {rules.length === 0 && (

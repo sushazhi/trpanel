@@ -74,15 +74,17 @@ export function SeedPolicyManager({ open, onClose }: { open: boolean; onClose: (
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
   const allTorrents = useAppStore((s) => s.torrents)
+  // 站点候选与自动文件管理/侧边栏同一来源（中文站点名）：
+  // 引擎侧已把站点名纳入匹配键，这里不再用 tracker 主机名，否则与另两处对不上
+  const torrentSites = useAppStore((s) => s.torrentSites)
 
   const allLabels = useMemo(
     () => Array.from(new Set(allTorrents.flatMap((x) => x.labels ?? []))).sort((a, b) => a.localeCompare(b, i18n.language)),
     [allTorrents, i18n.language],
   )
-  // 规则按 tracker 主机名匹配，候选项也取自主机名
   const allSites = useMemo(
-    () => Array.from(new Set(allTorrents.flatMap((x) => (x.trackerStats ?? []).map((ts) => ts.host)).filter(Boolean))).sort((a, b) => a.localeCompare(b, i18n.language)),
-    [allTorrents, i18n.language],
+    () => Array.from(new Set(Object.values(torrentSites).flat())).sort((a, b) => a.localeCompare(b, i18n.language)),
+    [torrentSites, i18n.language],
   )
 
   const load = useCallback(async () => {
@@ -99,6 +101,14 @@ export function SeedPolicyManager({ open, onClose }: { open: boolean; onClose: (
       load().catch(() => {})
       setEditing(null)
     }
+  }, [open, load])
+
+  // 面板打开期间低频轮询：后台引擎每 60s 评估一轮，
+  // 新产生的执行记录与规则开关状态要能跟着出现，而不是关掉重开才看得到
+  useEffect(() => {
+    if (!open) return
+    const timer = window.setInterval(() => { load().catch(() => {}) }, 15000)
+    return () => window.clearInterval(timer)
   }, [open, load])
 
   // 目标值与达标依据都按当前语言组装：后端只回 kind/actual/target 数值
@@ -231,7 +241,9 @@ export function SeedPolicyManager({ open, onClose }: { open: boolean; onClose: (
         <DialogHeader className="px-4 pt-4 pb-2 border-b border-gray-200/40 dark:border-gray-700/30">
           <DialogTitle>{t('seedPolicy.title')}</DialogTitle>
         </DialogHeader>
-        <div className="overflow-y-auto px-4 py-3 space-y-4">
+        {/* flex-1 min-h-0：没有 min-h-0 时该 flex 项会被内容撑到超出固定高度，
+            overflow-y-auto 失效（自身不溢出），下方的编辑表单/新规则会落到可视区外 */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4">
           <p className="text-footnote text-gray-500 leading-relaxed">{t('seedPolicy.intro')}</p>
 
           {/* 安全保护：对所有规则生效的安全下限 */}

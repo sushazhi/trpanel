@@ -70,6 +70,7 @@ export default function App() {
   const reduceMotion = useAppStore((s) => s.reduceMotion)
   const moreContrast = useAppStore((s) => s.moreContrast)
   const glassOpacity = useAppStore((s) => s.glassOpacity)
+  const wallpaper = useAppStore((s) => s.wallpaper)
   const a11yTouched = useAppStore((s) => s.a11yTouched)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -180,7 +181,21 @@ export default function App() {
     root.dataset.a11yMotion = reduceMotion ? 'reduce' : 'full'
     root.dataset.a11yContrast = moreContrast ? 'more' : 'normal'
     root.style.setProperty('--glass-user-opacity', String(glassOpacity / 100))
+    // 浓度滑杆反向驱动折射增强：低填充必须配高模糊/饱和，玻璃才"有东西可透"
+    root.style.setProperty('--glass-boost', String(1 - glassOpacity / 100))
   }, [reduceGlass, reduceMotion, moreContrast, glassOpacity])
+
+  // 壁纸：data-wallpaper 开关控制 CSS 侧洗罩层，--shell-wallpaper 提供 url()
+  useEffect(() => {
+    const root = document.documentElement
+    if (wallpaper) {
+      root.dataset.wallpaper = 'on'
+      root.style.setProperty('--shell-wallpaper', `url("${wallpaper}")`)
+    } else {
+      delete root.dataset.wallpaper
+      root.style.removeProperty('--shell-wallpaper')
+    }
+  }, [wallpaper])
 
   // 跟随宿主环境（如 fnOS 的系统主题/语言）；通用平台拿不到 env，保持用户自设
   useEffect(() => {

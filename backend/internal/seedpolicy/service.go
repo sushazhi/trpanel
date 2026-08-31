@@ -73,12 +73,23 @@ func (s *Service) Tick(ctx context.Context) (*Result, error) {
 		slog.Warn("做种策略：获取种子列表失败", "err", err)
 		return nil, err
 	}
+	// 站点规则用中文名选站（与侧边栏/自动文件管理同一口径），但列表接口只带
+	// trackerStats 主机名，站点名在详情的 trackers 里；这里复用同一份站点映射一次
+	// RPC 取全量，失败则退回仅按主机名匹配
+	siteNames := map[int64][]string{}
+	if needsSites(&st, rules) {
+		if m, err := s.manager.Client().GetTorrentSites(ctx); err == nil {
+			siteNames = m
+		} else {
+			slog.Warn("做种策略：获取站点列表失败，本轮仅按 tracker 主机名匹配", "err", err)
+		}
+	}
 	var plan []planItem
 	for _, t := range torrents {
 		if t == nil {
 			continue
 		}
-		item, ok := evaluate(&st, rules, t)
+		item, ok := evaluate(&st, rules, t, siteNames)
 		if !ok {
 			continue
 		}
@@ -111,7 +122,7 @@ func enabledRules(all []state.SeedPolicyRule) []*state.SeedPolicyRule {
 }
 
 // evaluate 依次套用保护栏与规则（按配置顺序命中第一条），返回待执行动作及达标依据
-func evaluate(st *state.State, rules []*state.SeedPolicyRule, t *rpc.Torrent) (planItem, bool) {
+func evaluate(st *state.State, rules []*state.SeedPolicyRule, t *rpc.Torrent, siteNames map[int64][]string) (planItem, bool) {
 	// 只处理下载完成的种子，否则会把做种目标误伤成下载中断
 	if !t.IsFinished {
 		return planItem{}, false
@@ -128,7 +139,7 @@ func evaluate(st *state.State, rules []*state.SeedPolicyRule, t *rpc.Torrent) (p
 	if guard.MinSeedHours > 0 && float64(t.SecondsSeeding)/3600 < guard.MinSeedHours {
 		return planItem{}, false
 	}
-	sites := siteKeys(t)
+	sites := siteKeys(t, siteNames[t.ID])
 	if matchesAny(guard.ExcludeSites, sites) || matchesAny(guard.ExcludeLabels, t.Labels) {
 		return planItem{}, false
 	}
@@ -341,23 +352,43 @@ func appendLogs(old, added []state.SeedPolicyLog, replacePreview bool) []state.S
 	return out
 }
 
-// siteKeys 返回种子用于规则匹配的 tracker 标识（主机名与 announce 地址）
-func siteKeys(t *rpc.Torrent) []string {
-	seen := make(map[string]struct{}, len(t.TrackerStats))
-	out := make([]string, 0, len(t.TrackerStats))
-	for _, ts := range t.TrackerStats {
-		for _, v := range []string{ts.Host, ts.Announce} {
-			if v == "" {
-				continue
-			}
-			if _, ok := seen[v]; ok {
-				continue
-			}
-			seen[v] = struct{}{}
-			out = append(out, v)
+// siteKeys 返回种子用于规则匹配的 tracker 标识（中文站点名、主机名与 announce 地址）。
+// 站点名与侧边栏站点分组、自动文件管理同一口径，规则里选中文站点名即可命中；
+// 兼容旧配置：填主机名或简称（双向子串）依然生效
+func siteKeys(t *rpc.Torrent, siteNames []string) []string {
+	seen := make(map[string]struct{}, len(t.TrackerStats)*2+len(siteNames))
+	out := make([]string, 0, len(t.TrackerStats)*2+len(siteNames))
+	add := func(v string) {
+		if v == "" {
+			return
 		}
+		if _, ok := seen[v]; ok {
+			return
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	for _, ts := range t.TrackerStats {
+		add(ts.Host)
+		add(ts.Announce)
+	}
+	for _, name := range siteNames {
+		add(name)
 	}
 	return out
+}
+
+// needsSites 规则或保护栏按站点收窄时，才值得多花一次 RPC 拉站点名映射
+func needsSites(st *state.State, rules []*state.SeedPolicyRule) bool {
+	if len(st.SeedPolicyGuard.ExcludeSites) > 0 {
+		return true
+	}
+	for _, r := range rules {
+		if len(r.Sites) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // primarySite 取主 tracker 主机名，仅用于执行记录展示

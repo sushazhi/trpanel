@@ -1,5 +1,5 @@
 import { Children, cloneElement, isValidElement, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronRight, FolderOpen } from 'lucide-react'
+import { Bug, ChevronRight, ExternalLink, FolderOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { client, request } from '@/api/client'
 import { APP_BASE } from '@/platform/appBase'
@@ -15,7 +15,6 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -52,6 +51,40 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
 })
 const timeToStr = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 const strToMin = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 60 + (m || 0) }
+
+// ========== 壁纸：本地图片 → 压缩 data URL ==========
+// 壁纸走 localStorage 持久化，原图动辄数 MB 会撑爆配额；
+// 统一缩到长边 1920 + JPEG 0.82，通常落到 200–400KB。PNG 的透明区填白避免糊黑
+function fileToWallpaper(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      const scale = Math.min(1, 1920 / Math.max(img.width, img.height))
+      const w = Math.max(1, Math.round(img.width * scale))
+      const h = Math.max(1, Math.round(img.height * scale))
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        URL.revokeObjectURL(objUrl)
+        reject(new Error('canvas unavailable'))
+        return
+      }
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, w, h)
+      ctx.drawImage(img, 0, 0, w, h)
+      URL.revokeObjectURL(objUrl)
+      resolve(canvas.toDataURL('image/jpeg', 0.82))
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(objUrl)
+      reject(new Error('invalid image'))
+    }
+    img.src = objUrl
+  })
+}
 
 // ========== 设置行 ==========
 // 标题与控件之间没有可见的 <label for> 关系，这里由 Row 统一给行内控件补 aria-label。
@@ -246,6 +279,12 @@ function SmallSelect({ value, onValueChange, options, className, 'aria-label': a
 
 // ========== 关于与检查更新 ==========
 // 检查更新依赖宿主的 app.update 能力（后端也只在对应平台注册 /api/update 路由）
+// 问题反馈渠道：界面（本仓库，已由 Transmission-WebUI-for-fnOS 更名为 trpanel）
+// 与飞牛应用分发（fpk 下载）分属两个 GitHub 仓库，
+// 与后端 fnos 平台的 updateRepo（sushazhi/fnos-transmission）保持一致
+const UI_REPO_ISSUES = 'https://github.com/sushazhi/trpanel/issues'
+const FPK_REPO_ISSUES = 'https://github.com/sushazhi/fnos-transmission/issues'
+
 function AboutSection({ transmissionVersion }: { transmissionVersion?: string }) {
   const { t } = useTranslation()
   const { can } = usePlatform()
@@ -305,31 +344,36 @@ function AboutSection({ transmissionVersion }: { transmissionVersion?: string })
   const readyWithoutInstall = !!info?.downloadReady && !updStatus
 
   return (
-    <div className="pt-3 mt-3 border-t border-gray-100 dark:border-gray-700 text-body text-gray-600 dark:text-gray-300">
-      <div className="flex items-center justify-between gap-2">
-        <span>
-          {t('session.about')}: Transmission WebUI{canUpdate ? ' for fnOS' : ''}
-          {transmissionVersion ? ` · Transmission ${transmissionVersion}` : ''}
-        </span>
+    <Section id="about" title={t('session.about')}>
+      {/* 产品与版本：标题行右侧放检查更新，版本号与说明作为次要信息收进 hint */}
+      <div className="flex items-center justify-between gap-3 py-1.5">
+        <div className="min-w-0">
+          <span className="text-body text-gray-600 dark:text-gray-300">
+            trpanel{canUpdate ? ' for fnOS' : ''}
+          </span>
+          <p className="text-caption1 text-gray-400 mt-0.5">
+            {transmissionVersion ? `Transmission ${transmissionVersion}` : t('session.checkUpdateHint')}
+          </p>
+        </div>
         {canUpdate && (
           <Button size="sm" variant="outline" className="h-8 text-footnote shrink-0" disabled={checking || downloading} onClick={() => void check()}>
             {checking ? t('common.loading') : t('session.checkUpdate')}
           </Button>
         )}
       </div>
-      {canUpdate && <p className="mt-1">{t('session.checkUpdateHint')}</p>}
+      {canUpdate && transmissionVersion && <p className="text-caption1 text-gray-400">{t('session.checkUpdateHint')}</p>}
       {info && (
-        <div className="mt-2 rounded-lg border border-gray-200/70 dark:border-gray-700/50 p-3 space-y-2">
+        <div className="rounded-lg border border-gray-200/70 dark:border-gray-700/50 p-3 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             {info.hasUpdate ? (
               <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">{t('session.newVersionFound')}</Badge>
             ) : (
               <Badge className="bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">{t('session.alreadyLatest')}</Badge>
             )}
-            <span>v{info.currentVersion} → v{info.latestVersion} ({info.arch})</span>
+            <span className="text-footnote">v{info.currentVersion} → v{info.latestVersion} ({info.arch})</span>
           </div>
           {info.hasUpdate && info.changelog && (
-            <div className="max-h-28 overflow-y-auto whitespace-pre-line text-gray-600 dark:text-gray-400">{info.changelog}</div>
+            <div className="max-h-28 overflow-y-auto whitespace-pre-line text-caption1 text-gray-600 dark:text-gray-400">{info.changelog}</div>
           )}
           {info.hasUpdate && (
             <div className="space-y-2">
@@ -338,10 +382,10 @@ function AboutSection({ transmissionVersion }: { transmissionVersion?: string })
                   <div className="h-1.5 rounded-full bg-gray-200/80 dark:bg-gray-700/60 overflow-hidden">
                     <div className="h-full bg-primary transition-all" style={{ width: `${updStatus?.progress ?? 0}%` }} />
                   </div>
-                  <p className="mt-1">{updStatus?.progress ?? 0}% · {updStatus?.message}</p>
+                  <p className="mt-1 text-footnote">{updStatus?.progress ?? 0}% · {updStatus?.message}</p>
                 </div>
               )}
-              {failed && <p className="text-red-500">{updStatus?.message || t('session.updateFailed')}</p>}
+              {failed && <p className="text-red-500 text-footnote">{updStatus?.message || t('session.updateFailed')}</p>}
               {done || readyWithoutInstall ? (
                 <div className="space-y-1">
                   <Button asChild size="sm" className="h-8 text-footnote">
@@ -349,7 +393,7 @@ function AboutSection({ transmissionVersion }: { transmissionVersion?: string })
                       {t('session.downloadFpk')}
                     </a>
                   </Button>
-                  <p>{t('session.fpkInstallHint')}</p>
+                  <p className="text-caption1 text-gray-400">{t('session.fpkInstallHint')}</p>
                 </div>
               ) : info.fpkUrl ? (
                 <div className="flex items-center gap-2 flex-wrap">
@@ -367,7 +411,36 @@ function AboutSection({ transmissionVersion }: { transmissionVersion?: string })
           )}
         </div>
       )}
-    </div>
+
+      {/* 问题反馈：界面与飞牛应用分属两处仓库，按问题类型引导到对应的 Issue 区 */}
+      <div className="rounded-lg border border-gray-200/70 dark:border-gray-700/50 p-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-footnote font-medium text-gray-700 dark:text-gray-200">
+          <Bug className="w-3.5 h-3.5 text-primary" />
+          {t('session.feedback')}
+        </div>
+        <p className="text-caption1 text-gray-400">{t(canUpdate ? 'session.feedbackHint' : 'session.feedbackHintUi')}</p>
+        <div className="space-y-1.5">
+          <FeedbackLink href={UI_REPO_ISSUES} label={t('session.feedbackUi')} />
+          {/* fpk 安装/更新仅在飞牛环境存在，渠道行随之显隐 */}
+          {canUpdate && <FeedbackLink href={FPK_REPO_ISSUES} label={t('session.feedbackFpk')} />}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+// 反馈渠道行：与弹窗内子卡片同一套边框/底色，整行可点 + 外链图标收在行尾
+function FeedbackLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-footnote bg-white/60 dark:bg-white/5 border border-gray-200/60 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/10 transition-colors"
+    >
+      <span className="min-w-0 truncate">{label}</span>
+      <ExternalLink className="w-3 h-3 shrink-0 text-gray-400 ml-auto" />
+    </a>
   )
 }
 
@@ -391,12 +464,36 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const setMoreContrast = useAppStore((s) => s.setMoreContrast)
   const glassOpacity = useAppStore((s) => s.glassOpacity)
   const setGlassOpacity = useAppStore((s) => s.setGlassOpacity)
+  const wallpaper = useAppStore((s) => s.wallpaper)
+  const setWallpaper = useAppStore((s) => s.setWallpaper)
+  const wallpaperInputRef = useRef<HTMLInputElement>(null)
+
+  // 壁过大时拒绝而不是硬塞：写满 localStorage 会把整个持久化 store 一起弄坏
+  const pickWallpaper = async (file: File | undefined) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error(t('session.wallpaperInvalid'))
+      return
+    }
+    try {
+      const dataUrl = await fileToWallpaper(file)
+      if (dataUrl.length > 4_500_000) {
+        toast.error(t('session.wallpaperTooLarge'))
+        return
+      }
+      setWallpaper(dataUrl)
+    } catch {
+      toast.error(t('session.wallpaperInvalid'))
+    }
+  }
 
   const [url, setUrl] = useState('')
   const [user, setUser] = useState('')
   const [pass, setPass] = useState('')
   const [saving, setSaving] = useState(false)
   const [pollInterval, setPollInterval] = useState('2s')
+  // 连接栏是本弹窗唯一的草稿区，存一份已保存快照用于判断是否"有未保存改动"
+  const [connSnapshot, setConnSnapshot] = useState({ url: '', user: '', pollInterval: '2s' })
   const [status, setStatus] = useState<{ connected: boolean; version?: string; error?: string } | null>(null)
   const [portOpen, setPortOpen] = useState<boolean | null>(null)
   const [testingPort, setTestingPort] = useState(false)
@@ -420,10 +517,12 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     request(clientGetSettings()).then((d) => {
       if (cancelled) return
       const data = d as { url: string; user: string; pollInterval?: string }
+      const pi = data.pollInterval || '2s'
       setUrl(data.url)
       setUser(data.user)
       setPass('')
-      if (data.pollInterval) setPollInterval(data.pollInterval)
+      setPollInterval(pi)
+      setConnSnapshot({ url: data.url, user: data.user, pollInterval: pi })
     }).catch(() => {})
     sessionApi.status().then((s) => { if (!cancelled) setStatus(s) }).catch(() => { if (!cancelled) setStatus(null) })
     setPortOpen(null)
@@ -438,21 +537,31 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     return () => { cancelled = true }
   }, [open])
 
+  // 只提交「连接配置」这一栏：其余设置项都是即时保存，没有统一的提交动作。
+  // 保存后留在弹窗里（后端不回读密码，本地清空即可），并刷新一次连接状态
   const save = async () => {
     if (!url.trim()) return
     setSaving(true)
     try {
       await request(clientPutSettings({ url: url.trim(), user, pass, pollInterval }))
       toast.success(t('toast.updated'))
+      setPass('')
+      setConnSnapshot({ url: url.trim(), user, pollInterval })
       sessionApi.get().then(setSession).catch(() => setSession(null))
       sessionApi.status().then(setStatus).catch(() => setStatus(null))
-      onClose()
     } catch {
       // 拦截器已提示
     } finally {
       setSaving(false)
     }
   }
+
+  // 连接栏是否存在未保存的改动
+  const connDirty =
+    url.trim() !== connSnapshot.url ||
+    user !== connSnapshot.user ||
+    pass !== '' ||
+    pollInterval !== connSnapshot.pollInterval
 
   const patchSession = async (patch: Record<string, unknown>) => {
     try {
@@ -479,6 +588,13 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const updateBlocklist = async () => {
     setBlocklistUpdating(true)
     try {
+      // 后端更新时读的是 session 里的 URL，输入框是草稿态，必须先回写再触发更新，
+      // 否则改了地址点「立即更新」用的还是旧地址
+      const current = sessionRef.current
+      if (current && blocklistUrl !== (current.blocklistUrl ?? '')) {
+        await sessionApi.update({ blocklistUrl })
+        setSession({ ...current, blocklistUrl })
+      }
       const res = await sessionApi.blocklistUpdate()
       toast.success(`${t('toast.updated')} · ${res.entries}`)
     } catch {
@@ -574,6 +690,13 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           </Button>
         </div>
       </Row>
+      {/* 保存只作用于本栏：放在栏内而不是全局页脚，避免被当成「整个设置的提交/取消」 */}
+      <div className="flex items-center justify-end gap-2 pt-2">
+        {connDirty && <span className="text-caption1 text-amber-600 dark:text-amber-400">{t('session.unsavedHint')}</span>}
+        <Button size="sm" className="h-8 text-footnote" disabled={saving || !url.trim()} onClick={() => void save()}>
+          {saving ? t('common.loading') : t('session.saveConfig')}
+        </Button>
+      </div>
     </div>
   )
 
@@ -591,6 +714,46 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       </Row>
       <Row label={t('session.showCheckboxes')} hint={t('session.showCheckboxesHint')}>
         <Switch checked={showCheckboxes} onCheckedChange={setShowCheckboxes} />
+      </Row>
+      <Row label={t('session.wallpaper')} hint={t('session.wallpaperHint')}>
+        <div className="flex items-center gap-2">
+          {wallpaper && (
+            <img
+              src={wallpaper}
+              alt=""
+              className="h-8 w-12 rounded-md object-cover border border-gray-200 dark:border-gray-700 shrink-0"
+            />
+          )}
+          <input
+            ref={wallpaperInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              void pickWallpaper(e.target.files?.[0])
+              // 允许选同一张图重试（失败后再次选择需触发 change）
+              e.target.value = ''
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-footnote shrink-0"
+            onClick={() => wallpaperInputRef.current?.click()}
+          >
+            {t('session.wallpaperChoose')}
+          </Button>
+          {wallpaper && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-footnote shrink-0"
+              onClick={() => setWallpaper('')}
+            >
+              {t('session.wallpaperClear')}
+            </Button>
+          )}
+        </div>
       </Row>
       <Row label={t('session.glassOpacity')} hint={t('session.glassOpacityHint')}>
         <div className="flex items-center gap-2 shrink-0">
@@ -1017,11 +1180,6 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           {/* 关于与检查更新 */}
           <AboutSection transmissionVersion={status?.version} />
         </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button disabled={saving} onClick={save}>{saving ? t('common.loading') : t('common.confirm')}</Button>
-        </DialogFooter>
       </DialogContent>
       <AutoMoveManager open={openMove} onClose={() => setOpenMove(false)} />
       <SeedPolicyManager open={openPolicy} onClose={() => setOpenPolicy(false)} />

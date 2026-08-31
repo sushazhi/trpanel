@@ -90,7 +90,7 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
           privateTorrent,
           pieceLength,
           comment: comment || undefined,
-          createdBy: 'Transmission WebUI for fnOS',
+          createdBy: 'trpanel for fnOS',
           webSeeds: webSeeds.split('\n').map((x) => x.trim()).filter(Boolean),
         },
         (done, total) => setProgress(total ? Math.round((done / total) * 100) : 0),

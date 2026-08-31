@@ -2,7 +2,7 @@
 
 @variant dark (&:where(.dark, .dark *));
 
-/* ===================== Design Tokens (Liquid Glass · Transmission WebUI for fnOS) ===================== */
+/* ===================== Design Tokens (Liquid Glass · trpanel) ===================== */
 /* 可插值的玻璃变量：必须用 @property 注册，否则 var() 参与 backdrop-filter 时只会离散跳变、无法过渡 */
 @property --dock-blur {
   syntax: '<length>';
@@ -261,12 +261,15 @@
   --side-pad-top: calc(var(--pad-top) - var(--chrome-inset-top));
   --side-pad-bottom: calc(var(--pad-bottom) - var(--chrome-inset-bottom));
 
-  /* 玻璃材质梯度：rest（无内容穿透时近乎清澈）→ active（有内容滚动时折射增强） */
-  --glass-blur-rest: 8px;
-  --glass-blur-active: 28px;
+  /* 玻璃材质梯度：rest（无内容穿透时近乎清澈）→ active（有内容滚动时折射增强）。
+     模糊/饱和挂 --glass-boost 联动：浓度滑杆调低填充的同时拉高折射，
+     否则「更透」只会透出一面纯色墙，玻璃观感不变（玻璃好不好看取决于后面有什么） */
+  --glass-boost: 0;
+  --glass-blur-rest: calc(8px + var(--glass-boost) * 12px);
+  --glass-blur-active: calc(28px + var(--glass-boost) * 14px);
   --glass-blur-float: 40px;
-  --glass-sat-rest: 130%;
-  --glass-sat-active: 190%;
+  --glass-sat-rest: calc(130% + var(--glass-boost) * 80%);
+  --glass-sat-active: calc(190% + var(--glass-boost) * 60%);
   --glass-fill-rest: 0;
   --glass-fill-active: 1;
   /* 用户可调玻璃浓度乘数（设置滑杆 20–100% → 0.2–1），无障碍降级时忽略 */
@@ -495,6 +498,35 @@ select {
   --m-bottom: var(--side-pad-bottom);
   --fade-top: calc(var(--m-top) + 28px);
   --fade-bottom: calc(var(--m-bottom) + 28px);
+}
+
+/* ===================== 壁纸层（玻璃的折射源） ===================== */
+/* 壁纸画在壳背景与内容层之间：.tm-shell 是隔离的堆叠上下文（backdrop root），
+   ::before 在停靠玻璃之下参与绘制，backdrop-filter 才能把它纳入折射。
+   无壁纸时整层 opacity: 0，默认外观不变。 */
+.tm-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: var(--shell-wallpaper, none);
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-standard);
+}
+html[data-wallpaper='on'] .tm-shell::before {
+  opacity: 1;
+  /* 可读性洗罩：与主题背景同色调的半透明层压住壁纸的高频细节，
+     玻璃上的文字仍可辨识；壁纸依旧为玻璃提供颜色与亮度差 */
+  background-image:
+    linear-gradient(180deg, rgba(238, 241, 251, 0.42), rgba(228, 222, 246, 0.56)),
+    var(--shell-wallpaper, none);
+}
+html[data-wallpaper='on'].dark .tm-shell::before {
+  background-image:
+    linear-gradient(180deg, rgba(18, 18, 24, 0.48), rgba(16, 15, 22, 0.62)),
+    var(--shell-wallpaper, none);
 }
 
 /* ===================== Reusable visuals ===================== */
@@ -920,12 +952,14 @@ select {
     position: absolute;
     inset: -10px;
   }
-  /* 菜单行 py-1.5 只有约 28px，触屏一律 44pt */
+  /* 菜单行 py-1.5 只有约 28px，触屏需要放大命中区。
+     种子菜单有 17 项，44pt 会顶满整个手机屏、看着格外松散，
+     取 40px 与弹窗按钮同档：仍远高于单行文字，但一屏能多放两三行 */
   [role='menuitem'],
   [role='menuitemradio'],
   [role='menuitemcheckbox'],
   .tm-ctx button {
-    min-height: 44px;
+    min-height: 40px;
   }
   /* 弹窗/抽屉工具条里大量 h-8（32px）按钮同样偏小；开关除外，否则会被拉成高条 */
   .tm-dialog button:not([role='switch']),

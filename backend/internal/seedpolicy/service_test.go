@@ -50,8 +50,12 @@ func ratioRule(action string, minRatio, minDays float64) *state.SeedPolicyRule {
 }
 
 func evalWith(guard state.SeedPolicyGuard, rules []*state.SeedPolicyRule, t *rpc.Torrent) (planItem, bool) {
+	return evalWithNames(guard, rules, t, nil)
+}
+
+func evalWithNames(guard state.SeedPolicyGuard, rules []*state.SeedPolicyRule, t *rpc.Torrent, names map[int64][]string) (planItem, bool) {
 	st := &state.State{SeedPolicyGuard: guard}
-	return evaluate(st, rules, t)
+	return evaluate(st, rules, t, names)
 }
 
 func TestEvaluateHitsWhenReached(t *testing.T) {
@@ -138,6 +142,26 @@ func TestRuleScopeMatchesSiteAndLabel(t *testing.T) {
 	rule2.Labels = []string{"HD"}
 	if _, ok := evalWith(state.SeedPolicyGuard{}, []*state.SeedPolicyRule{rule2}, seed); !ok {
 		t.Error("标签命中且站点范围为空时应命中")
+	}
+}
+
+// 站点规则用中文站点名（与自动文件管理同一口径），中文名来自按需拉取的站点映射。
+// 注意 matchesAny 是双向子串匹配，用例里的中文名不能与域名有子串关系，否则测不出差异
+func TestRuleScopeMatchesChineseSiteName(t *testing.T) {
+	rule := ratioRule(state.PolicyActionPause, 5, 0)
+	rule.Sites = []string{"馒头站"}
+	// 未传站点映射时只有主机名/announce，中文站点名匹配不上
+	if _, ok := evalWith(state.SeedPolicyGuard{}, []*state.SeedPolicyRule{rule}, seedingTorrent(okTracker("kp.m-team.cc"))); ok {
+		t.Error("没有站点名映射时不应按中文名命中")
+	}
+	names := map[int64][]string{7: {"馒头站", "另一站"}}
+	if _, ok := evalWithNames(state.SeedPolicyGuard{}, []*state.SeedPolicyRule{rule}, seedingTorrent(okTracker("kp.m-team.cc")), names); !ok {
+		t.Error("站点映射里包含该中文名时应命中")
+	}
+	// 保护栏的排除站点同样吃这份映射
+	guard := state.SeedPolicyGuard{ExcludeSites: []string{"馒头站"}}
+	if _, ok := evalWithNames(guard, []*state.SeedPolicyRule{ratioRule(state.PolicyActionPause, 5, 0)}, seedingTorrent(okTracker("kp.m-team.cc")), names); ok {
+		t.Error("命中排除站点时不应进入任何规则")
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, RotateCcw } from 'lucide-react'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -380,6 +380,23 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
     estimateSize: () => rowHeight,
     overscan: 12,
   })
+
+  const scrollTargetIds = useAppStore((s) => s.scrollTargetIds)
+  const consumeScrollTarget = useAppStore((s) => s.consumeScrollTarget)
+  // 从分组切回「全部」后滚回之前选中的种子；在绘制前定位，避免先闪一下旧位置。
+  // 按 scrollTargetIds 的顺序（最后点选的锚点在前）定位第一个仍在新列表里的种子
+  useLayoutEffect(() => {
+    if (scrollTargetIds.length === 0) return
+    consumeScrollTarget()
+    const indexOf = new Map(sortedTorrents.map((t, i) => [t.id, i]))
+    for (const id of scrollTargetIds) {
+      const idx = indexOf.get(id)
+      if (idx !== undefined) {
+        virtualizer.scrollToIndex(idx, { align: 'center' })
+        break
+      }
+    }
+  }, [scrollTargetIds, sortedTorrents, virtualizer, consumeScrollTarget])
 
   const handleMenuClick = (torrent: Torrent) => (key: string) => {
     const id = torrent.id

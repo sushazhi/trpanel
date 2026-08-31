@@ -24,13 +24,19 @@ const RULES: ErrorRule[] = [
     key: 'errors.trackerHttp',
     params: (m) => ({ code: m[1] }),
   },
+  // 数据不在原位：Transmission 会先暂停任务，再报这句带操作指引的长文案。
+  // 必须排在下面 noDataFound 系列之前，否则会被那条规则先截走，丢掉"已暂停"的信息
+  {
+    re: /paused torrent as no data was found/i,
+    key: 'errors.pausedNoDataFound',
+  },
   // 完整句式（Transmission 会附带"设置位置/校验本地数据"的操作指引），需整句替换
   {
-    re: /^no data found!?\s*ensure your drives are connected/i,
+    re: /no data (?:was )?found!?\s*ensure your drives are connected/i,
     key: 'errors.noDataFoundHint',
   },
-  // 兜底：只要以 "No data found!" 开头就翻译，避免后半句文案变化导致漏翻
-  { re: /^no data found!?/i, key: 'errors.noDataFound' },
+  // 兜底：只要出现 "No data found!" 就翻译，避免前缀或后半句文案变化导致漏翻
+  { re: /no data (?:was )?found!?/i, key: 'errors.noDataFound' },
   { re: /couldn'?t connect to server/i, key: 'errors.connectFailed' },
   { re: /connection refused/i, key: 'errors.connectionRefused' },
   { re: /\btimed? ?out\b|\btimeout\b/i, key: 'errors.timeout' },

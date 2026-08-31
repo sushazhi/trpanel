@@ -145,7 +145,7 @@ export function buildTorrentMenu(ctx: MenuCtx, torrent: Torrent): MenuItem[] {
 // ========== 渲染菜单项（递归支持子菜单） ==========
 function renderItems(items: MenuItem[], onClick: (key: string) => void) {
   return items.map((item, idx) => {
-    if (item.type === 'divider') return <DropdownMenuSeparator key={`div-${idx}`} />
+    if (item.type === 'divider') return <DropdownMenuSeparator key={`div-${idx}`} className="my-0.5" />
     if (item.children) {
       return (
         <DropdownMenuSub key={item.key}>
@@ -173,6 +173,19 @@ function renderItems(items: MenuItem[], onClick: (key: string) => void) {
     )
   })
 }
+
+// 菜单行样式：主菜单、子菜单入口、子菜单项共用一份。
+// 子菜单会 portal 到 body，写成三份时最容易漂移出「队列操作那几项比别的小」这类差异
+const ctxRow = (opts?: { danger?: boolean; disabled?: boolean }) =>
+  cn(
+    'w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left focus-visible:outline-none',
+    opts?.danger
+      ? 'text-red-500 hover:bg-red-500/10 focus-visible:bg-red-500/10'
+      : 'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:bg-primary/10 focus-visible:text-primary',
+    opts?.disabled && 'opacity-40 pointer-events-none',
+  )
+// 分隔线：菜单行本身已有内边距，再给 4px 外边距会把相邻两组推得过开
+const ctxDivider = 'h-px my-0.5 bg-white/60 dark:bg-white/10'
 
 // ========== 手写右键菜单（跟随鼠标位置，视口内自动翻转） ==========
 export function FloatingContextMenu({ pos, items, onPick, onClose }: {
@@ -233,7 +246,7 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
     >
       {items.map((item, idx) => {
         if (item.type === 'divider') {
-          return <div key={`div-${idx}`} className="h-px my-1 bg-white/60 dark:bg-white/10" />
+          return <div key={`div-${idx}`} className={ctxDivider} />
         }
         if (item.children) {
           return <CtxSubMenu key={item.key} item={item} onPick={onPick} />
@@ -243,13 +256,7 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
             key={item.key}
             disabled={item.disabled}
             onClick={() => onPick(item.key as string)}
-            className={cn(
-              'w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left focus-visible:outline-none',
-              item.danger
-                ? 'text-red-500 hover:bg-red-500/10 focus-visible:bg-red-500/10'
-                : 'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:bg-primary/10 focus-visible:text-primary',
-              item.disabled && 'opacity-40 pointer-events-none',
-            )}
+            className={ctxRow({ danger: item.danger, disabled: item.disabled })}
           >
             {item.icon}
             {item.label}
@@ -304,7 +311,7 @@ function CtxSubMenu({ item, onPick }: { item: MenuItem; onPick: (key: string) =>
             openMenu()
           }
         }}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:bg-primary/10 focus-visible:text-primary"
+        className={ctxRow()}
       >
         {item.icon}
         {item.label}
@@ -322,20 +329,14 @@ function CtxSubMenu({ item, onPick }: { item: MenuItem; onPick: (key: string) =>
           >
             {item.children?.map((child, idx) => {
               if (child.type === 'divider') {
-                return <div key={`div-${idx}`} className="h-px my-1 bg-white/60 dark:bg-white/10" />
+                return <div key={`div-${idx}`} className={ctxDivider} />
               }
               return (
                 <button
                   key={child.key}
                   disabled={child.disabled}
                   onClick={() => onPick(child.key as string)}
-                  className={cn(
-                    'w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left focus-visible:outline-none',
-                    child.danger
-                      ? 'text-red-500 hover:bg-red-500/10 focus-visible:bg-red-500/10'
-                      : 'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:bg-primary/10 focus-visible:text-primary',
-                    child.disabled && 'opacity-40 pointer-events-none',
-                  )}
+                  className={ctxRow({ danger: child.danger, disabled: child.disabled })}
                 >
                   {child.icon}
                   {child.label}
@@ -368,7 +369,9 @@ function SubMenuPositioned({ pos, children }: { pos: { x: number; y: number }; c
     <div
       ref={ref}
       onMouseDown={(e) => e.stopPropagation()}
-      className="fixed z-[110] min-w-36"
+      // tm-ctx：带上主菜单的标记类，子菜单才会吃到「触屏菜单行最小高度」等适配，
+      // 否则它 portal 到 body 后行高只有 28px，比主菜单矮一截
+      className="tm-ctx fixed z-[110] min-w-36"
       style={style}
     >
       {children}

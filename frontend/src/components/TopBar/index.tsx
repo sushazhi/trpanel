@@ -197,11 +197,12 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
         {/* Logo + 标题 */}
         <div className="flex items-center gap-2.5 shrink-0">
           <span className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] flex items-center justify-center shadow-lg shadow-primary/30">
-            <span className="text-white font-bold text-body tracking-tight">TW</span>
+            <span className="text-white font-bold text-body tracking-tight">TR</span>
           </span>
           <div className="leading-tight hidden sm:block">
             <span className="font-semibold text-subhead text-gray-800 dark:text-gray-100">
-              <span className="text-primary">Transmission</span> WebUI <span className="text-gray-400 dark:text-gray-500 font-medium text-body">for fnOS</span>
+              <span className="text-primary">trpanel</span>
+              {can('app.update') && <span className="text-gray-400 dark:text-gray-500 font-medium text-body"> for fnOS</span>}
             </span>
           </div>
         </div>

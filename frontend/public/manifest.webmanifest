@@ -1,6 +1,6 @@
 {
-  "name": "Transmission WebUI for fnOS",
-  "short_name": "Transmission",
+  "name": "trpanel for fnOS",
+  "short_name": "trpanel",
   "description": "Modern Transmission BitTorrent Web UI",
   "id": "./",
   "start_url": "./",

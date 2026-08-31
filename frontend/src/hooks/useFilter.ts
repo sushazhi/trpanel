@@ -68,6 +68,11 @@ export function sortValue(t: Torrent, field: string): number {
   }
 }
 
+// 搜索规范化：小写并去掉空格/标点，保留字母、数字与中日韩文字
+export function normalizeSearch(s: string): string {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
 // 状态过滤匹配
 export function matchesStatus(t: Torrent, s: string): boolean {
   switch (s) {
@@ -138,11 +143,11 @@ export function useFilter(
       list = list.filter((t) => filters.error.includes(t.errorString))
     }
 
-    // 搜索（名称/哈希）
-    const q = filters.search.trim().toLowerCase()
+    // 搜索（名称/哈希，模糊匹配：忽略空格与标点、不区分大小写）
+    const q = normalizeSearch(filters.search)
     if (q) {
       list = list.filter(
-        (t) => t.name.toLowerCase().includes(q) || t.hashString.toLowerCase().includes(q),
+        (t) => normalizeSearch(t.name).includes(q) || normalizeSearch(t.hashString).includes(q),
       )
     }
 

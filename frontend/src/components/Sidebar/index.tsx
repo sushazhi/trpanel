@@ -26,6 +26,7 @@ import { useAppStore } from '@/stores/appStore'
 import { sessionApi } from '@/api/torrent'
 import { matchesStatus } from '@/hooks/useFilter'
 import { useNavRail } from '@/hooks/useNavRail'
+import { usePlatform } from '@/platform'
 import { formatBytes, formatRatio, formatSpeed } from '@/utils/format'
 import { translateError } from '@/utils/errorText'
 import { tagColor } from '@/utils/tagColor'
@@ -888,6 +889,7 @@ interface MobileDrawerProps {
 
 export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, onOpenSettings }) => {
   const { t } = useTranslation()
+  const { can } = usePlatform()
   const filters = useAppStore((s) => s.filters)
   const setFilters = useAppStore((s) => s.setFilters)
   const torrentSites = useAppStore((s) => s.torrentSites)
@@ -999,9 +1001,10 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
         <SheetHeader className="border-b border-white/60 dark:border-white/10 pb-2">
           <SheetTitle className="flex items-center gap-2">
             <span className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] flex items-center justify-center">
-              <span className="text-white font-bold text-footnote">TW</span>
+              <span className="text-white font-bold text-footnote">TR</span>
             </span>
-            <span className="text-primary">Transmission</span> WebUI <span className="text-gray-400 dark:text-gray-500 font-medium text-footnote">for fnOS</span>
+            <span className="text-primary">trpanel</span>
+            {can('app.update') && <span className="text-gray-400 dark:text-gray-500 font-medium text-footnote"> for fnOS</span>}
           </SheetTitle>
         </SheetHeader>
 

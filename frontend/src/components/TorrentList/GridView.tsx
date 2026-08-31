@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/stores/appStore'
 import { formatBytes, formatDuration, formatRatio, formatSpeed } from '@/utils/format'
@@ -41,9 +41,26 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
   const setSelection = useAppStore((s) => s.setSelection)
   const selectAnchorId = useAppStore((s) => s.selectAnchorId)
   const setSelectAnchor = useAppStore((s) => s.setSelectAnchor)
+  const scrollTargetIds = useAppStore((s) => s.scrollTargetIds)
+  const consumeScrollTarget = useAppStore((s) => s.consumeScrollTarget)
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
   const [removeIds, setRemoveIds] = useState<number[] | null>(null)
   const [trackerOpen, setTrackerOpen] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // 从分组切回「全部」后滚回之前选中的种子；在绘制前定位，避免先闪一下旧位置。
+  // 按 scrollTargetIds 的顺序（最后点选的锚点在前）定位第一个仍在新列表里的种子
+  useLayoutEffect(() => {
+    if (scrollTargetIds.length === 0) return
+    consumeScrollTarget()
+    for (const id of scrollTargetIds) {
+      const el = listRef.current?.querySelector<HTMLElement>(`[data-torrent-id="${id}"]`)
+      if (el) {
+        el.scrollIntoView({ block: 'center' })
+        break
+      }
+    }
+  }, [scrollTargetIds, torrents, consumeScrollTarget])
 
   if (torrents.length === 0) {
     return <div className="p-8 text-center text-gray-400">{t('common.empty')}</div>
@@ -100,6 +117,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
 
   return (
     <div
+      ref={listRef}
       className="tm-scroll h-full"
       style={{ paddingLeft: 'calc(var(--safe-left) + 0.75rem)', paddingRight: 'calc(var(--safe-right) + 0.75rem)' }}
     >
@@ -130,6 +148,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                 onClick={(e) => handleSelect(torrent, e)}
                 onDoubleClick={() => onOpenDetail(torrent)}
                 data-selected={selected || undefined}
+                data-torrent-id={torrent.id}
                 className={cn(
                   'glass-card tm-card flex items-start gap-3.5 p-3.5 cursor-default select-none group',
                   selected && 'z-[1]',

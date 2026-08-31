@@ -41,11 +41,26 @@ export const defaultFilters: FilterOptions = {
   sortOrder: 'asc',
 }
 
+// 列表是否处于某一分组内：状态（非 all）/ 标签 / 站点 / 目录 / 错误任一命中即算。
+// 搜索不算分组——它是叠加在任何分组之上的临时条件，清空分组时列表未必回到全部。
+// 与 useFilter 的判定保持一致：status 为空数组同样视为不过滤。
+function inGroup(f: FilterOptions): boolean {
+  return (
+    (f.status[0] != null && f.status[0] !== 'all') ||
+    f.labels.length > 0 ||
+    f.sites.length > 0 ||
+    f.downloadDirs.length > 0 ||
+    f.error.length > 0
+  )
+}
+
 export interface AppState {
   torrents: Torrent[]
   selectedIds: number[]
   // Shift 连选的锚点（最后点击的种子 id，不持久化）
   selectAnchorId: number | null
+  // 从分组切回「全部」后待定位的种子（列表视图滚动到其中第一个可见项后清空，不持久化）
+  scrollTargetIds: number[]
   filters: FilterOptions
   sortField: string
   sortOrder: 'asc' | 'desc'
@@ -79,8 +94,10 @@ export interface AppState {
   reduceMotion: boolean
   moreContrast: boolean
   a11yTouched: boolean
-  // 玻璃浓度百分比（20–100），驱动 --glass-user-opacity 乘数
+  // 玻璃浓度百分比（20–100），驱动 --glass-user-opacity 填充乘数与 --glass-boost 折射联动
   glassOpacity: number
+  // 背景壁纸（data URL，空串 = 关闭）。玻璃折射的主要色源
+  wallpaper: string
 
   setSortField: (field: string) => void
   setSortOrder: (order: 'asc' | 'desc') => void
@@ -99,6 +116,7 @@ export interface AppState {
   selectAll: () => void
   clearSelection: () => void
   setFilters: (patch: Partial<FilterOptions>) => void
+  consumeScrollTarget: () => void
   toggleTheme: () => void
   setTheme: (t: 'light' | 'dark') => void
   setThemePreset: (p: string) => void
@@ -117,6 +135,7 @@ export interface AppState {
   setReduceMotion: (v: boolean) => void
   setMoreContrast: (v: boolean) => void
   setGlassOpacity: (n: number) => void
+  setWallpaper: (v: string) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -125,6 +144,7 @@ export const useAppStore = create<AppState>()(
       torrents: [],
       selectedIds: [],
       selectAnchorId: null,
+      scrollTargetIds: [],
       filters: defaultFilters,
       sortField: 'name',
       sortOrder: 'asc',
@@ -151,6 +171,7 @@ export const useAppStore = create<AppState>()(
       moreContrast: false,
       a11yTouched: false,
       glassOpacity: 100,
+      wallpaper: '',
 
       setFontSize: (n) => set({ fontSize: n }),
       setGroupShowSize: (v) => set({ groupShowSize: v }),
@@ -173,7 +194,22 @@ export const useAppStore = create<AppState>()(
       clearSelection: () => set({ selectedIds: [] }),
       setSortField: (field) => set({ sortField: field }),
       setSortOrder: (order) => set({ sortOrder: order }),
-      setFilters: (patch) => set((state) => ({ filters: { ...state.filters, ...patch } })),
+      setFilters: (patch) =>
+        set((state) => {
+          const filters = { ...state.filters, ...patch }
+          // 从任一分组（状态/标签/站点/目录/错误）切回「全部」时列表会重排，
+          // 记下当前选区，让列表视图渲染后滚回之前选中的种子（锚点优先）
+          let scrollTargetIds = state.scrollTargetIds
+          if (inGroup(state.filters) && !inGroup(filters) && state.selectedIds.length > 0) {
+            const anchor = state.selectAnchorId
+            scrollTargetIds =
+              anchor != null && state.selectedIds.includes(anchor)
+                ? [anchor, ...state.selectedIds.filter((id) => id !== anchor)]
+                : [...state.selectedIds]
+          }
+          return { filters, scrollTargetIds }
+        }),
+      consumeScrollTarget: () => set({ scrollTargetIds: [] }),
       toggleTheme: () => set((state) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
       setTheme: (t) => set({ theme: t }),
       setThemePreset: (p) => set({ themePreset: p }),
@@ -207,6 +243,7 @@ export const useAppStore = create<AppState>()(
       setReduceMotion: (v) => set({ reduceMotion: v, a11yTouched: true }),
       setMoreContrast: (v) => set({ moreContrast: v, a11yTouched: true }),
       setGlassOpacity: (n) => set({ glassOpacity: Math.min(100, Math.max(20, Math.round(n))) }),
+      setWallpaper: (v) => set({ wallpaper: v }),
     }),
     {
       name: 'tm-store',
@@ -234,6 +271,7 @@ export const useAppStore = create<AppState>()(
         moreContrast: state.moreContrast,
         a11yTouched: state.a11yTouched,
         glassOpacity: state.glassOpacity,
+        wallpaper: state.wallpaper,
       }),
       // 兼容旧版本持久化数据：补齐新增字段，避免运行时 undefined 崩溃
       merge: (persisted, current) => {
@@ -255,6 +293,7 @@ export const useAppStore = create<AppState>()(
           showStats: p.showStats ?? true,
           viewMode: p.viewMode ?? 'table',
           themePreset: p.themePreset ?? 'blue',
+          wallpaper: p.wallpaper ?? '',
           sidebarCollapsed: p.sidebarCollapsed ?? { labels: false, dirs: false, sites: false, error: false },
         }
       },
