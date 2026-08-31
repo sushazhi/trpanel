@@ -5,9 +5,12 @@
   同时拉起前后端：前端 http://localhost:5173，后端 http://localhost:8200。
   所有开发运行时产物（后端状态文件 tm-state.json、前后端日志）统一写入
   项目根 dev/ 目录，避免污染代码目录。
+  -mock 额外启动 Transmission mock（:9092）并把后端指向它；切回真实远端时
+  去掉 -mock，并在设置里把连接地址改回真实 Transmission。
 #>
 param(
-    [switch]$bg  # 后台模式：启动后立即返回，不占用终端（日志写入 dev/logs/）
+    [switch]$bg,    # 后台模式：启动后立即返回，不占用终端（日志写入 dev/logs/）
+    [switch]$mock   # 同时启动 Transmission mock（:9092）并把后端指向它
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +33,18 @@ Write-Host "[dev]   前端日志     -> $FrontendLog"     -ForegroundColor DarkG
 # 后端运行时数据（tm-state.json / .env.local 等）写入 dev/data，而非代码目录
 $env:TM_DATA_DIR = $DataDir
 
+# Mock Transmission（可选）：-mock 时拉起 trmock 并用 TR_URL 把后端指向它
+$MockLog = Join-Path $LogDir "mock.log"
+$mockProcess = $null
+if ($mock) {
+    $env:TR_URL = "http://localhost:9092/transmission/rpc"
+    Write-Host "[dev] Mock Transmission: $($env:TR_URL) （日志 $MockLog）" -ForegroundColor DarkGray
+    $mockProcess = Start-Process -WindowStyle Hidden -FilePath "cmd.exe" `
+        -WorkingDirectory (Join-Path $Root "backend") `
+        -ArgumentList "/c", "go run ./cmd/trmock > `"$MockLog`" 2>&1" `
+        -PassThru
+}
+
 # 后端：装了 air 则启用热重载（.go 变更自动重编译重启），否则回退 go run
 $backendCmd = if (Get-Command air -ErrorAction SilentlyContinue) {
     Write-Host "[dev] 后端热重载：air（.go 变更自动重编译重启）"    -ForegroundColor DarkGray
@@ -51,7 +66,12 @@ $frontend = Start-Process -WindowStyle Hidden -FilePath "cmd.exe" `
     -ArgumentList "/c", "pnpm dev > `"$FrontendLog`" 2>&1" `
     -PassThru
 
-Write-Host "[dev] 已启动  后端 PID=$($backend.Id)  前端 PID=$($frontend.Id)" -ForegroundColor Green
+if ($mockProcess) {
+    Write-Host "[dev] 已启动  后端 PID=$($backend.Id)  前端 PID=$($frontend.Id)  Mock PID=$($mockProcess.Id)" -ForegroundColor Green
+    Write-Host "[dev]   Mock RPC -> http://localhost:9092/transmission/rpc" -ForegroundColor DarkGray
+} else {
+    Write-Host "[dev] 已启动  后端 PID=$($backend.Id)  前端 PID=$($frontend.Id)" -ForegroundColor Green
+}
 Write-Host "[dev] 前端 http://localhost:5173   后端 http://localhost:8200"    -ForegroundColor Green
 if ($bg) {
     Write-Host "[dev] 后台模式已启动，日志见 dev/logs/" -ForegroundColor Green
@@ -66,6 +86,7 @@ try {
     }
 } finally {
     # cmd.exe 是父进程，需连同子进程树一起结束
+    if ($mockProcess) { & taskkill /PID $mockProcess.Id /T /F 2>$null }
     & taskkill /PID $backend.Id  /T /F 2>$null
     & taskkill /PID $frontend.Id /T /F 2>$null
     Write-Host "[dev] 已停止前后端进程" -ForegroundColor Cyan

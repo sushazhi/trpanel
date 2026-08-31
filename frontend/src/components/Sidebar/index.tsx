@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Activity,
   AlertCircle,
   ArrowDown,
   ArrowUp,
@@ -7,18 +8,18 @@ import {
   CheckCircle,
   ChevronDown,
   CloudDownload,
-  Download,
   FolderOpen,
   Globe,
   HardDrive,
   Layers,
+  PauseCircle,
   RotateCcw,
   Search,
   Server,
   Settings,
   ShieldAlert,
   Tags,
-  X,
+  Upload,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/stores/appStore'
@@ -33,15 +34,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 
-// 主状态过滤（与图一 1:1）：全部 / 正在下载 / 正在做种 / 已完成 / 暂停 / 校验 / 错误
+// 主状态过滤：全部 / 活跃 / 正在下载 / 正在做种 / 已完成 / 暂停 / 校验 / 错误
 // 图标统一由中性色承载、激活时染品牌色；仅 error 在存在异常时保留红色语义
 // 导出供移动端滑动切分类复用：滑动顺序与列表必须同源，否则会出现滑得到、点不到的分类
 export const STATUS_ITEMS: { key: string; icon: React.ElementType; label: string }[] = [
   { key: 'all', icon: Layers, label: 'nav.all' },
+  { key: 'active', icon: Activity, label: 'nav.active' },
   { key: 'downloading', icon: CloudDownload, label: 'nav.downloading' },
-  { key: 'seeding', icon: Download, label: 'nav.seeding' },
+  { key: 'seeding', icon: Upload, label: 'nav.seeding' },
   { key: 'completed', icon: CheckCircle, label: 'nav.completed' },
-  { key: 'paused', icon: X, label: 'nav.paused' },
+  { key: 'paused', icon: PauseCircle, label: 'nav.paused' },
   { key: 'verifying', icon: RotateCcw, label: 'nav.verifying' },
   { key: 'error', icon: ShieldAlert, label: 'nav.error' },
 ]

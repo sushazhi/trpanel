@@ -4,14 +4,20 @@
 # 避免污染代码目录。
 #
 # 用法：
-#   ./dev.sh        前台运行，Ctrl+C 一并退出前后端
-#   ./dev.sh -bg    后台运行，日志写入 dev/logs/，不占用终端
+#   ./dev.sh             前台运行，Ctrl+C 一并退出前后端
+#   ./dev.sh -bg         后台运行，日志写入 dev/logs/，不占用终端
+#   ./dev.sh -mock       额外启动 Transmission mock（:9092）并把后端指向它；
+#                        切回真实远端时去掉 -mock，并在设置里把连接地址改回真实 Transmission
 set -euo pipefail
 
 BG=0
-if [ "${1:-}" = "-bg" ]; then
-  BG=1
-fi
+MOCK=0
+for arg in "$@"; do
+  case "$arg" in
+    -bg) BG=1 ;;
+    -mock) MOCK=1 ;;
+  esac
+done
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 DEV_DIR="$ROOT/dev"
@@ -34,6 +40,15 @@ done
 
 # 后端运行时数据写入 dev/data，而非代码目录
 export TM_DATA_DIR="$DATA_DIR"
+
+# Mock Transmission（可选）：-mock 时拉起 trmock 并用 TR_URL 把后端指向它
+MOCK_PID=""
+if [ "$MOCK" -eq 1 ]; then
+  export TR_URL="http://localhost:9092/transmission/rpc"
+  echo "[dev] Mock Transmission: $TR_URL （日志 $LOG_DIR/mock.log）"
+  ( cd "$ROOT/backend" && go run ./cmd/trmock ) >"$LOG_DIR/mock.log" 2>&1 &
+  MOCK_PID=$!
+fi
 
 # 后端：装了 air 则启用热重载（.go 变更自动重编译重启），否则回退 go run
 if command -v air >/dev/null 2>&1; then
@@ -64,13 +79,19 @@ kill_tree() {
 
 cleanup() {
   echo "[dev] 停止进程..."
+  [ -n "$MOCK_PID" ] && kill_tree "$MOCK_PID"
   kill_tree "$BACKEND_PID"
   kill_tree "$FRONTEND_PID"
   wait 2>/dev/null || true
   echo "[dev] 已停止前后端进程"
 }
 
-echo "[dev] 已启动 后端PID=$BACKEND_PID 前端PID=$FRONTEND_PID"
+if [ -n "$MOCK_PID" ]; then
+  echo "[dev] 已启动 后端PID=$BACKEND_PID 前端PID=$FRONTEND_PID Mock PID=$MOCK_PID"
+  echo "[dev]   Mock RPC -> http://localhost:9092/transmission/rpc"
+else
+  echo "[dev] 已启动 后端PID=$BACKEND_PID 前端PID=$FRONTEND_PID"
+fi
 
 if [ "$BG" -eq 0 ]; then
   trap cleanup EXIT INT TERM

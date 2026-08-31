@@ -494,6 +494,8 @@ export default {
     downloadFpk: 'Download fpk package',
     fpkInstallHint: 'Then install it via App Center → Manual Install',
     viewRelease: 'View release',
+    updateLater: 'Remind me later',
+    ignoreVersion: 'Ignore this version',
     network: 'Network & Bandwidth',
     upnp: 'UPnP / NAT-PMP',
     upnpHint: 'Auto-opens a router port for more inbound connections',

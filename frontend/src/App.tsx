@@ -3,6 +3,7 @@ import { Plus, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { torrentApi, sessionApi } from '@/api/torrent'
 import { AddTorrent } from '@/components/AddTorrent'
+import { AppUpdatePrompt } from '@/components/AppUpdatePrompt'
 import { AuthTokenDialog } from '@/components/AuthTokenDialog'
 import { Dashboard } from '@/components/Dashboard'
 import { DesktopSidebar, MobileDrawer, STATUS_ITEMS } from '@/components/Sidebar'
@@ -120,7 +121,7 @@ export default function App() {
 
   const stepStatus = async (delta: number) => {
     const at = statusOrder.indexOf(swipeRef.current)
-    // 当前分类已不在列表中（如遗留的 'active'、或刚被隐藏的分组）时从左端重新起步
+    // 当前分类已不在列表中（如刚被隐藏的分组）时从左端重新起步
     const next = statusOrder[(at < 0 ? 0 : at) + delta]
     if (!next) return
     await sessionApi.get().catch(() => {})
@@ -379,6 +380,7 @@ export default function App() {
       <TorrentDetail torrent={detailTorrent} onClose={() => setDetailTorrent(null)} onOpenChange={(open) => { if (!open) setDetailTorrent(null) }} isMobile={isMobile} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <PwaUpdatePrompt />
+      <AppUpdatePrompt />
       <AuthTokenDialog />
       <ConfirmHost />
       {/* 系统 chrome 颜色跟随品牌预设，否则 PWA 下顶栏色带断层会破坏玻璃延伸感 */}

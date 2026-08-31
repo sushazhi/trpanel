@@ -521,7 +521,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
                     onClick={(e) => handleSelect(torrent, e)}
                     className={`tm-nav-item flex items-center px-3 h-full border-b border-gray-100/60 dark:border-white/[0.04] text-body cursor-default select-none ${
                       selectedIds.includes(torrent.id)
-                        ? 'tm-nav-active'
+                        ? 'tm-row-selected'
                         : ''
                     } hover:bg-gray-100/50 dark:hover:bg-white/[0.04]`}
                     onDoubleClick={() => onOpenDetail(torrent)}

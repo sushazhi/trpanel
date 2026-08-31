@@ -110,6 +110,22 @@ dev/
 > `dev/` 已在 `.gitignore` 中整体忽略，无需提交。
 > 后端数据目录通过环境变量 `TM_DATA_DIR` 指向 `dev/data`；生产部署不设置该变量时仍使用默认 `~/.trpanel`，二者互不影响。
 
+### 没有可用的 Transmission？用内置 Mock
+
+仓库自带一个说 Transmission RPC 协议的开发用 mock（`backend/cmd/trmock`），内置覆盖各状态的种子数据并实时推进进度/速度，无需真实 Transmission 即可联调前后端：
+
+```bash
+./dev.sh -mock       # Linux / macOS：一键起前后端 + mock（mock 监听 :9092）
+.\dev.ps1 -mock      # Windows：同上
+```
+
+也可以单独运行：`cd backend && go run ./cmd/trmock`（默认 `127.0.0.1:9092`，`-h` 查看 `-seed`/`-tick`/`-static` 等选项）。
+
+**在 mock 与真实远端之间切换**（后端支持运行时热切换，无需重启）：
+
+- 界面切换：设置 → 连接地址，填 `http://localhost:9092/transmission/rpc`（mock）或真实远端（如 `http://<ip>:9091/transmission/rpc`），保存即生效。
+- 启动时指定：`TR_URL=http://localhost:9092/transmission/rpc`（指向 mock）或真实地址。
+
 ## 使用指南
 
 部署启动后，按以下流程即可开始管理 Transmission 下载任务。

@@ -714,26 +714,60 @@ select {
 .glass-card[data-selected='true'] {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--color-primary) 18%, rgba(255, 255, 255, 0.9)) 0%,
-    color-mix(in srgb, var(--color-primary) 9%, rgba(255, 255, 255, 0.62)) 100%
+    color-mix(in srgb, var(--color-primary) 26%, rgba(255, 255, 255, 0.9)) 0%,
+    color-mix(in srgb, var(--color-primary) 14%, rgba(255, 255, 255, 0.62)) 100%
   );
-  border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 58%, transparent);
   /* 内高光翻到上下两侧 + 外发光：玻璃被"点亮"而不是被"框住" */
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 color-mix(in srgb, var(--color-primary) 26%, transparent),
-    0 0 0 0.5px color-mix(in srgb, var(--color-primary) 30%, transparent),
-    0 6px 20px color-mix(in srgb, var(--color-primary) 26%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 color-mix(in srgb, var(--color-primary) 30%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--color-primary) 42%, transparent),
+    0 6px 20px color-mix(in srgb, var(--color-primary) 34%, transparent);
 }
 .dark .glass-card[data-selected='true'] {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--color-primary) 26%, rgba(52, 52, 60, 0.92)) 0%,
-    color-mix(in srgb, var(--color-primary) 13%, rgba(30, 30, 38, 0.72)) 100%
+    color-mix(in srgb, var(--color-primary) 36%, rgba(52, 52, 60, 0.92)) 0%,
+    color-mix(in srgb, var(--color-primary) 20%, rgba(30, 30, 38, 0.72)) 100%
   );
-  border-color: color-mix(in srgb, var(--color-primary) 46%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 62%, transparent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -1px 0 color-mix(in srgb, var(--color-primary) 30%, transparent),
-    0 0 0 0.5px color-mix(in srgb, var(--color-primary) 34%, transparent),
-    0 6px 22px color-mix(in srgb, var(--color-primary) 30%, transparent);
+    inset 0 -1px 0 color-mix(in srgb, var(--color-primary) 34%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--color-primary) 46%, transparent),
+    0 6px 22px color-mix(in srgb, var(--color-primary) 38%, transparent);
+}
+
+/* 表格行选中：比侧栏导航的 tm-nav-active 更重一档——行太薄，浅渗入会和行 hover 的灰底
+   混在一起看不出差别；这里加深渗入并在左缘加 3px 品牌色标条（Finder / Mail 式选中语言）。
+   带 :hover 变体是因为行上还有 hover:bg-* 工具类，不加会被 hover 灰盖回去。 */
+.tm-row-selected {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 26%, rgba(255, 255, 255, 0.85)) 0%,
+    color-mix(in srgb, var(--color-primary) 14%, rgba(255, 255, 255, 0.6)) 100%
+  );
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+.tm-row-selected:hover {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 30%, rgba(255, 255, 255, 0.88)) 0%,
+    color-mix(in srgb, var(--color-primary) 18%, rgba(255, 255, 255, 0.64)) 100%
+  );
+}
+.dark .tm-row-selected {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 38%, rgba(58, 58, 66, 0.8)) 0%,
+    color-mix(in srgb, var(--color-primary) 20%, rgba(40, 40, 48, 0.64)) 100%
+  );
+  box-shadow: inset 3px 0 0 var(--color-primary-soft);
+}
+.dark .tm-row-selected:hover {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 42%, rgba(58, 58, 66, 0.84)) 0%,
+    color-mix(in srgb, var(--color-primary) 24%, rgba(40, 40, 48, 0.68)) 100%
+  );
 }
 
 /* 侧栏导航：滑动玻璃胶囊指示器（对齐 adaptable sidebar 规范） */
@@ -964,6 +998,16 @@ html[data-a11y-glass='reduce'].dark .glass-card {
 html[data-a11y-glass='reduce'].dark .glass-subcard {
   background: #3a3a3c;
   border-color: #48484a;
+}
+/* 减弱玻璃时选中态也不能丢：上面的规则会把卡片重置为纯色底，
+   这里在实心兜底色上再叠一层品牌色，保证任何玻璃档位下选中都可辨识 */
+html[data-a11y-glass='reduce'] .glass-card[data-selected='true'] {
+  background: color-mix(in srgb, var(--color-primary) 14%, #ffffff);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+}
+html[data-a11y-glass='reduce'].dark .glass-card[data-selected='true'] {
+  background: color-mix(in srgb, var(--color-primary) 24%, #26262b);
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
 }
 /* 增强对比：玻璃上的文字全部升为 primary label，描边加粗 */
 html[data-a11y-contrast='more'] {

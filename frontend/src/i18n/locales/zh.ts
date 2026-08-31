@@ -493,6 +493,8 @@ export default {
     downloadFpk: '下载 fpk 更新包',
     fpkInstallHint: '下载后前往 应用中心 → 手动安装 上传该文件完成更新',
     viewRelease: '查看发布页',
+    updateLater: '稍后提醒',
+    ignoreVersion: '忽略此版本',
     network: '网络与带宽',
     upnp: 'UPnP / NAT-PMP',
     upnpHint: '自动向路由器开端口，提升入站连接数',
