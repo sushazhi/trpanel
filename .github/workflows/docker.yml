@@ -1,0 +1,289 @@
+# 自动构建并发布容器镜像（linux/amd64 + linux/arm64）
+#
+# 构建方式：每个架构各用一台**原生** runner（amd64 用 x86 机器、arm64 用 ARM 机器），
+# 不再用 QEMU 模拟。arm64 构建从十几分钟降到两三分钟，也不再有模拟器的偶发失败。
+# 流程：各架构按 digest 推送 → merge job 用 imagetools 合并成多架构 manifest list。
+#
+# 触发与标签：
+#   • 推送 master          → 镜像标签 master
+#   • 推送 v* 标签         → 镜像标签与仓库标签**完全一致**（如 v0.1.0）
+#                            且当该标签是当前最大版本时，额外打上 latest
+#   • Pull Request         → 只构建验证，不推送
+#   • 手动触发（可勾选推送）→ 按当前 ref 生成标签
+#
+# 默认发布到 GHCR（ghcr.io/<owner>/<repo>，使用仓库自带的 GITHUB_TOKEN，无需额外配置）；
+# 若额外配置了 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN 两个 secrets，会同时推送到 Docker Hub。
+#
+# ⚠️ ARM runner（ubuntu-24.04-arm）对公开仓库免费；若本仓库是私有的且未开通 ARM runner，
+#    把下面矩阵里 arm64 的 runner 改成 ubuntu-24.04，并取消「准备 QEMU」步骤的注释即可
+#    回退为 x86 + QEMU 模拟构建。
+
+name: Docker
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      push:
+        description: 是否推送镜像
+        type: boolean
+        default: false
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: 构建 ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 原生架构构建，默认无需 QEMU。回退为 x86 模拟时取消下一行注释：
+      # - uses: docker/setup-qemu-action@v3
+
+      - name: 准备 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 推送开关：PR 一定不推；手动触发看勾选
+      - name: 计算推送开关
+        id: cond
+        run: echo "push=${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push) }}" >> "$GITHUB_OUTPUT"
+
+      - name: 登录 GHCR
+        if: steps.cond.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 未配置 secrets 时整步跳过，不影响 GHCR 发布
+      - name: 登录 Docker Hub（可选）
+        if: ${{ steps.cond.outputs.push == 'true' && secrets.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 生成镜像列表：GHCR 一定有，Docker Hub 仅在配置了 secrets 时追加
+      - name: 解析目标仓库
+        id: repos
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          set -e
+          images="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [ -n "${DOCKERHUB_USERNAME}" ]; then
+            images="${images}"$'\n'"docker.io/${DOCKERHUB_USERNAME}/trpanel"
+          fi
+          {
+            echo 'images<<EOF'
+            printf '%s\n' "${images}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # 只有在「当前标签就是仓库最大版本」时才打 latest，
+      # 避免在旧标签上重新构建时把 latest 指回头
+      - name: 判断是否为最新版本
+        id: latest
+        run: |
+          set -e
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+            echo "非标签构建，不打 latest"
+            exit 0
+          fi
+          newest=$(git ls-remote --tags --refs origin 'v*' \
+            | awk -F'/' '{print $3}' \
+            | sort -V \
+            | tail -n 1)
+          echo "当前标签：${GITHUB_REF_NAME}　仓库最新标签：${newest:-<无>}"
+          if [ "${newest}" = "${GITHUB_REF_NAME}" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 生成镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.repos.outputs.images }}
+          # type=ref,event=tag：镜像标签与仓库 Git 标签完全一致（v1.2.3）
+          # type=ref,event=branch：分支构建（master）
+          # type=ref,event=pr：PR 构建（pr-123，仅本地验证不推送，避免标签为空）
+          # type=raw：仅当该标签是当前最新版本才打 latest
+          tags: |
+            type=ref,event=tag
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable=${{ steps.latest.outputs.is_latest == 'true' }}
+
+      # PR / 未勾选推送：只构建验证，不产生任何镜像产物
+      - name: 构建验证
+        if: steps.cond.outputs.push != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+
+      # 按 digest 推送（不带 tag），稍后由 merge job 合并成多架构清单
+      - name: 构建并推送（by digest）
+        id: push
+        if: steps.cond.outputs.push == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ steps.meta.outputs.tags }},push-by-digest=true,name-canonical=true,push=true,provenance=false
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+
+      - name: 导出 digest
+        if: steps.cond.outputs.push == 'true'
+        run: |
+          set -e
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: 上传 digest
+        if: steps.cond.outputs.push == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: 合并多架构清单
+    runs-on: ubuntu-24.04
+    needs: [build]
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push)
+    steps:
+      # 需要 origin 远端才能用 git ls-remote 判断最新标签（不拉取代码，仅配置 remote）
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载各架构 digest
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: 准备 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 登录 Docker Hub（可选）
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 解析目标仓库
+        id: repos
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          set -e
+          images="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [ -n "${DOCKERHUB_USERNAME}" ]; then
+            images="${images}"$'\n'"docker.io/${DOCKERHUB_USERNAME}/trpanel"
+          fi
+          {
+            echo 'images<<EOF'
+            printf '%s\n' "${images}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 判断是否为最新版本
+        id: latest
+        run: |
+          set -e
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          newest=$(git ls-remote --tags --refs origin 'v*' | awk -F'/' '{print $3}' | sort -V | tail -n 1)
+          if [ "${newest}" = "${GITHUB_REF_NAME}" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 生成镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.repos.outputs.images }}
+          tags: |
+            type=ref,event=tag
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ steps.latest.outputs.is_latest == 'true' }}
+
+      # 每个仓库分别合并：tag 与 digest 必须同属一个 registry
+      - name: 合并并推送清单
+        working-directory: /tmp/digests
+        env:
+          IMAGES: ${{ steps.repos.outputs.images }}
+        run: |
+          set -e
+          for img in ${IMAGES}; do
+            img_tags=$(jq -cr --arg img "${img}" '.tags | map(select(startswith($img))) | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+            args=""
+            for d in *; do
+              args="${args} ${img}@sha256:${d}"
+            done
+            echo "==> ${img}（tag: ${img_tags}）"
+            docker buildx imagetools create ${img_tags} ${args}
+          done
+
+      - name: 输出镜像信息
+        run: |
+          {
+            echo '### 🐳 镜像已发布（linux/amd64 + linux/arm64，原生构建）'
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
