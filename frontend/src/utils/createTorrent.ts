@@ -22,7 +22,7 @@ async function sha1(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(digest)
 }
 
-// 浏览器端创建 .torrent（bencode + 分片 SHA1）
+// 浏览器端创建 .torrent（bencode + 块 SHA1）
 export async function createTorrent(
   files: TorrentSourceFile[],
   opts: CreateTorrentOptions,
@@ -98,7 +98,7 @@ export async function createTorrent(
   return bencodeEncode(root)
 }
 
-// 推荐分片大小
+// 推荐块大小
 export function suggestPieceLength(totalSize: number): number {
   if (totalSize < 256 * 1024 * 1024) return 256 * 1024
   if (totalSize < 1024 * 1024 * 1024) return 512 * 1024

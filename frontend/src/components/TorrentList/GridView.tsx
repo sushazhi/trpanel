@@ -39,6 +39,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
   const showCheckboxes = useAppStore((s) => s.showCheckboxes)
   const toggleSelect = useAppStore((s) => s.toggleSelect)
   const setSelection = useAppStore((s) => s.setSelection)
+  const clearSelection = useAppStore((s) => s.clearSelection)
   const selectAnchorId = useAppStore((s) => s.selectAnchorId)
   const setSelectAnchor = useAppStore((s) => s.setSelectAnchor)
   const scrollTargetIds = useAppStore((s) => s.scrollTargetIds)
@@ -47,6 +48,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
   const [removeIds, setRemoveIds] = useState<number[] | null>(null)
   const [trackerOpen, setTrackerOpen] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
+  const lastClickRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 })
 
   // 从分组切回「全部」后滚回之前选中的种子；在绘制前定位，避免先闪一下旧位置。
   // 按 scrollTargetIds 的顺序（最后点选的锚点在前）定位第一个仍在新列表里的种子
@@ -87,6 +89,15 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
     // 触屏没有右键也没有悬停：点按即打开详情，选择交给常显的 checkbox 与 ⋮
     if (isMobile || isCoarse) {
       onOpenDetail(torrent)
+      return
+    }
+    // 再点一次已选中的唯一项 = 取消选中；300ms 内同行两击是双击前半程，不取消
+    const now = Date.now()
+    const repeatClick = lastClickRef.current.id === torrent.id && now - lastClickRef.current.t <= 300
+    lastClickRef.current = { id: torrent.id, t: now }
+    if (repeatClick) return
+    if (selectedIds.length === 1 && selectedIds[0] === torrent.id) {
+      clearSelection()
       return
     }
     setSelection([torrent.id])
@@ -227,8 +238,9 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                     )}
                   </div>
 
-                  {/* 元信息：已下载大小 / 下行 / 上行 / 分享率 / 做种时长 同行，自适应宽度，不换行 */}
-                  <div className="flex flex-nowrap items-center gap-x-2.5 text-footnote text-gray-500 dark:text-gray-400 mt-1.5 min-w-0 overflow-hidden">
+                  {/* 元信息：已下载大小 / 下行 / 上行 / 分享率 / 做种时长 同行，自适应宽度；
+                      手机上放不下时允许折行（全 shrink-0 + nowrap 会整行溢出被裁掉，做种时长就看不见了） */}
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-footnote text-gray-500 dark:text-gray-400 mt-1.5 min-w-0 overflow-hidden">
                     <span className="tm-mono shrink-0">{downloadedSize}</span>
                     <span className="tm-mono shrink-0 text-green-600 dark:text-green-400">↓{formatSpeed(torrent.rateDownload)}</span>
                     <span className="tm-mono shrink-0 text-blue-600 dark:text-blue-400">↑{formatSpeed(torrent.rateUpload)}</span>

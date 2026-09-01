@@ -93,11 +93,22 @@ func AuthAllowQuery(token string) gin.HandlerFunc {
 }
 
 func authWith(token string, allowQuery bool) gin.HandlerFunc {
-	if token == "" {
-		return func(c *gin.Context) { c.Next() }
-	}
-	want := []byte(token)
+	return dynamicAuthWith(func() string { return token }, allowQuery)
+}
+
+// DynamicAuth 与 Auth 相同的校验，但令牌每次请求时从 getter 取，支持运行期变更
+// （MCP 接入令牌在设置界面热更新）；返回空串表示未启用鉴权，直接放行。
+func DynamicAuth(getToken func() string) gin.HandlerFunc {
+	return dynamicAuthWith(getToken, false)
+}
+
+func dynamicAuthWith(getToken func() string, allowQuery bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		want := strings.TrimSpace(getToken())
+		if want == "" {
+			c.Next()
+			return
+		}
 		got := c.GetHeader("X-Auth-Token")
 		if got == "" {
 			if _, after, ok := strings.Cut(c.GetHeader("Authorization"), "Bearer "); ok {
@@ -107,7 +118,7 @@ func authWith(token string, allowQuery bool) gin.HandlerFunc {
 		if got == "" && allowQuery {
 			got = c.Query("token")
 		}
-		if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
+		if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
 			respondForbidden(c, http.StatusUnauthorized, "未授权：缺少或错误的访问令牌")
 			return
 		}

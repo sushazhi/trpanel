@@ -5,7 +5,6 @@
 # 流程：各架构按 digest 推送 → merge job 用 imagetools 合并成多架构 manifest list。
 #
 # 触发与标签：
-#   • 推送 master          → 镜像标签 master
 #   • 推送 v* 标签         → 镜像标签与仓库标签**完全一致**（如 v0.1.0）
 #                            且当该标签是当前最大版本时，额外打上 latest
 #   • Pull Request         → 只构建验证，不推送
@@ -22,8 +21,6 @@ name: Docker
 
 on:
   push:
-    branches:
-      - master
     tags:
       - 'v*'
   pull_request:
@@ -287,3 +284,4 @@ jobs:
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+

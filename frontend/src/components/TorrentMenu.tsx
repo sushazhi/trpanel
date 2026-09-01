@@ -13,6 +13,7 @@ import {
   Play,
   RefreshCw,
   Settings2,
+  ShieldCheck,
   Star,
   Tags,
   Trash2,
@@ -75,7 +76,7 @@ export interface MenuCtx {
   onEdit: (mode: EditMode, t: Torrent) => void
   // 宿主支持「在文件管理器中定位目录」时才显示该项
   canRevealPath?: boolean
-  // 打开「批量删除达标种子」对话框（全局操作，入口放在种子右键菜单底部）
+  // 打开「批量清理已完成」对话框（全局操作，入口放在种子右键菜单底部）
   onOpenBatchClean?: () => void
 }
 
@@ -83,7 +84,6 @@ export interface MenuItem {
   key?: string
   label?: string
   icon?: ReactNode
-  danger?: boolean
   disabled?: boolean
   checked?: boolean
   type?: 'divider'
@@ -103,8 +103,8 @@ export function buildTorrentMenu(ctx: MenuCtx, torrent: Torrent): MenuItem[] {
     { key: 'startNow', label: t('action.startNow'), icon: primaryIcon(<Zap className="w-4 h-4" />) },
     { key: 'start', label: t('action.start'), icon: primaryIcon(<Play className="w-4 h-4" />), disabled: isActive },
     { key: 'stop', label: t('action.stop'), icon: primaryIcon(<Pause className="w-4 h-4" />), disabled: !isActive },
-    { key: 'verify', label: t('action.verify'), icon: primaryIcon(<RefreshCw className="w-4 h-4" />) },
-    { key: 'remove', label: t('action.remove'), danger: true, icon: errorIcon(<Trash2 className="w-4 h-4" />) },
+    { key: 'verify', label: t('action.verify'), icon: primaryIcon(<ShieldCheck className="w-4 h-4" />) },
+    { key: 'remove', label: t('action.remove'), icon: errorIcon(<Trash2 className="w-4 h-4" />) },
     { type: 'divider' },
     { key: 'reannounce', label: t('action.reannounce'), icon: primaryIcon(<RefreshCw className="w-4 h-4" />) },
     { key: 'path', label: t('action.changePath'), icon: primaryIcon(<FolderOpen className="w-4 h-4" />) },
@@ -136,7 +136,7 @@ export function buildTorrentMenu(ctx: MenuCtx, torrent: Torrent): MenuItem[] {
     ...(ctx.onOpenBatchClean
       ? [
           { type: 'divider' as const },
-          { key: 'deleteCompleted', label: t('action.deleteCompleted'), danger: true, icon: errorIcon(<Trash2 className="w-4 h-4" />) },
+          { key: 'deleteCompleted', label: t('action.deleteCompleted'), icon: errorIcon(<Trash2 className="w-4 h-4" />) },
         ]
       : []),
   ]
@@ -163,7 +163,7 @@ function renderItems(items: MenuItem[], onClick: (key: string) => void) {
       <DropdownMenuItem
         key={item.key}
         disabled={item.disabled}
-        className={cn('text-footnote gap-2', item.danger && 'text-red-500 focus:text-red-500 focus:bg-red-500/10')}
+        className="text-footnote gap-2"
         onSelect={(e) => { e.preventDefault(); onClick(item.key as string) }}
       >
         {item.icon}
@@ -175,13 +175,12 @@ function renderItems(items: MenuItem[], onClick: (key: string) => void) {
 }
 
 // 菜单行样式：主菜单、子菜单入口、子菜单项共用一份。
-// 子菜单会 portal 到 body，写成三份时最容易漂移出「队列操作那几项比别的小」这类差异
-const ctxRow = (opts?: { danger?: boolean; disabled?: boolean }) =>
+// 子菜单会 portal 到 body，写成三份时最容易漂移出「队列操作那几项比别的小」这类差异。
+// 危险操作不整行标红（红字观感像换字体），红色只出现在图标上
+const ctxRow = (opts?: { disabled?: boolean }) =>
   cn(
     'w-full flex items-center gap-2 px-2.5 py-1.5 text-footnote rounded-lg transition-colors text-left focus-visible:outline-none',
-    opts?.danger
-      ? 'text-red-500 hover:bg-red-500/10 focus-visible:bg-red-500/10'
-      : 'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:bg-primary/10 focus-visible:text-primary',
+    'text-gray-700 dark:text-gray-200 hover:bg-primary/10 hover:text-primary focus-visible:bg-primary/10 focus-visible:text-primary',
     opts?.disabled && 'opacity-40 pointer-events-none',
   )
 // 分隔线：菜单行本身已有内边距，再给 4px 外边距会把相邻两组推得过开
@@ -256,7 +255,7 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
             key={item.key}
             disabled={item.disabled}
             onClick={() => onPick(item.key as string)}
-            className={ctxRow({ danger: item.danger, disabled: item.disabled })}
+            className={ctxRow({ disabled: item.disabled })}
           >
             {item.icon}
             {item.label}
@@ -336,7 +335,7 @@ function CtxSubMenu({ item, onPick }: { item: MenuItem; onPick: (key: string) =>
                   key={child.key}
                   disabled={child.disabled}
                   onClick={() => onPick(child.key as string)}
-                  className={ctxRow({ danger: child.danger, disabled: child.disabled })}
+                  className={ctxRow({ disabled: child.disabled })}
                 >
                   {child.icon}
                   {child.label}

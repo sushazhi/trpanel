@@ -25,6 +25,7 @@ export default defineConfig({
       : {}),
     proxy: {
       '/api': { target: 'http://localhost:8200', changeOrigin: true },
+      '/mcp': { target: 'http://localhost:8200', changeOrigin: true },
       '/ws': { target: 'ws://localhost:8200', ws: true },
     },
   },

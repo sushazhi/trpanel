@@ -39,10 +39,8 @@ func (h *Handler) saveServers(c *gin.Context) {
 		return
 	}
 	for i := range body.Servers {
-		if body.Servers[i].URL == "" {
-			respondError(c, http.StatusBadRequest, "服务器地址不能为空")
-			return
-		}
+		// 空地址行是尚未填完的草稿，必须收下：界面逐键保存整份列表，
+		// 拒收会让「添加服务器」必然失败，本地留下后端不存在的幽灵行（删除它再报 400）
 		// 切换服务器时会写入 .env.local（dotenv 按行解析），含换行即注入新的配置键
 		for _, f := range []struct{ name, value string }{
 			{"地址", body.Servers[i].URL},
@@ -138,6 +136,10 @@ func (h *Handler) switchServer(c *gin.Context) {
 		return
 	}
 	srv := st.Servers[body.Index]
+	if srv.URL == "" {
+		respondError(c, http.StatusBadRequest, "该服务器未填写地址")
+		return
+	}
 	if !srv.Enabled {
 		respondError(c, http.StatusBadRequest, "该服务器未启用")
 		return
@@ -163,7 +165,14 @@ func (h *Handler) switchServer(c *gin.Context) {
 		slog.Warn("持久化活动服务器失败", "index", body.Index, "err", err)
 		warnings = append(warnings, "活动服务器未能写入状态文件，重启后会回到原服务器")
 	}
-	if err := config.SaveConnection(h.dataDir, srv.URL, srv.User, srv.Pass, h.hub.getPollInterval().String()); err != nil {
+	if err := config.SaveLocalSettings(h.dataDir, config.LocalSettings{
+		TransmissionURL: srv.URL,
+		User:            srv.User,
+		Pass:            srv.Pass,
+		PollInterval:    h.hub.getPollInterval().String(),
+		MCPEnabled:      h.mcp.Enabled.Load(),
+		MCPAllowDelete:  h.mcp.AllowDelete.Load(),
+	}); err != nil {
 		slog.Warn("持久化连接配置失败", "err", err)
 		warnings = append(warnings, "连接配置未能写入 .env.local，重启后仍会使用原地址")
 	}

@@ -9,11 +9,11 @@ import {
   Pause,
   Play,
   Plus,
-  RefreshCw,
   Repeat,
   RotateCcw,
   Search,
   Settings,
+  ShieldCheck,
   SquareCheck,
   SquareX,
   Tags,
@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
 import { useRevealPath } from '@/hooks/useRevealPath'
+import { useSemanticPath } from '@/hooks/useSemanticPath'
 import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
 import { cn, cssVars } from '@/lib/utils'
@@ -104,6 +105,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   const actions = useTorrentActions()
   const { can, pickFolder } = usePlatform()
   const revealPath = useRevealPath()
+  const sem = useSemanticPath()
   const [avatarOpen, setAvatarOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
@@ -165,7 +167,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
     if (el instanceof HTMLElement && el.dataset.searchInput !== undefined) el.blur()
   }, [isMobile, hasSelection])
 
-  // 批量校验 / 重新通告（循环调用单种子接口，统一提示）
+  // 批量校验 / 重新汇报（循环调用单种子接口，统一提示）
   const runLoop = async (fn: (id: number) => Promise<unknown>, key: string) => {
     if (selectedIds.length === 0) return
     setBusy(true)
@@ -207,14 +209,14 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
           </div>
         </div>
 
-        {/* 搜索：移动端选中时 spring 收缩让位给批量操作；无选中时相对整行居中 */}
+        {/* 搜索：选中时收缩让位给批量操作（移动端直接收起）；无选中时相对整行居中 */}
         <div
           className={cn(
             'min-w-0 flex items-center transition-[width,opacity,transform,scale] duration-[350ms] [transition-timing-function:var(--ease-spring)]',
             isMobile && hasSelection
               ? 'w-0 opacity-0 scale-90 pointer-events-none'
               : hasSelection
-                ? 'flex-1 max-w-md'
+                ? 'w-56 shrink-0'
                 : 'mx-auto w-full max-w-md',
           )}
         >
@@ -255,7 +257,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
               <ToolBtn icon={Trash2} large={isMobile} title={t('action.remove')} danger disabled={busy} onClick={() => setRemoveOpen(true)} />
               <ToolBtn icon={FolderInput} large={isMobile} title={t('action.changePath')} disabled={busy} onClick={() => setMoveOpen(true)} />
               <ToolBtn icon={Tags} large={isMobile} title={t('action.editLabels')} disabled={busy} onClick={onOpenLabels} />
-              <ToolBtn icon={RefreshCw} large={isMobile} title={t('action.verify')} disabled={busy} onClick={() => runLoop((id) => torrentApi.verify(id), 'toast.verifyStarted')} />
+              <ToolBtn icon={ShieldCheck} large={isMobile} title={t('action.verify')} disabled={busy} onClick={() => runLoop((id) => torrentApi.verify(id), 'toast.verifyStarted')} />
               <ToolBtn icon={Repeat} large={isMobile} title={t('action.reannounce')} disabled={busy} onClick={() => runLoop((id) => torrentApi.reannounce(id), 'toast.reannounced')} />
 
               <span className="h-5 px-2 ml-1 rounded-full bg-primary/10 text-primary text-caption1 font-semibold flex items-center whitespace-nowrap">
@@ -264,22 +266,6 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
 
               <span className="w-px h-5 bg-gray-200 dark:bg-white/10 mx-1.5 shrink-0" />
 
-              <button
-                onClick={onOpenLabels}
-                className={cn(
-                  isMobile ? 'h-11 px-4' : 'h-9 px-3',
-                  'flex items-center justify-center rounded-full text-body font-medium transition-colors shrink-0',
-                  filters.labels.length > 0
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-primary hover:bg-primary/10',
-                )}
-                title={t('action.editLabels')}
-              >
-                <span className="flex items-center gap-1">
-                  <span className="tm-mono">#</span>
-                  {filters.labels.length}
-                </span>
-              </button>
               <ToolBtn icon={RotateCcw} large={isMobile} title={t('filter.clear')} disabled={!hasActiveFilters} onClick={clearAll} />
             </div>
           </div>
@@ -404,7 +390,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
           {filters.downloadDirs.map((dir) => (
             <FilterChip
               key={dir}
-              label={dir}
+              label={sem(dir)}
               onRemove={() => setFilters({ downloadDirs: filters.downloadDirs.filter((d) => d !== dir) })}
               color="var(--hue-green)"
             />

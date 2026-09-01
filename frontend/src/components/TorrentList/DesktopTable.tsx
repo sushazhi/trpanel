@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
 import { useRevealPath } from '@/hooks/useRevealPath'
+import { useSemanticPath } from '@/hooks/useSemanticPath'
 import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
 import type { ColumnConfig, Torrent } from '@/types'
@@ -33,6 +34,7 @@ const NUMERIC_COLS = new Set([
 // 单元格渲染
 function Cell({ torrent, col }: { torrent: Torrent; col: ColumnConfig }) {
   const { t } = useTranslation()
+  const sem = useSemanticPath()
   switch (col.key) {
     case 'name':
       return (
@@ -137,7 +139,7 @@ function Cell({ torrent, col }: { torrent: Torrent; col: ColumnConfig }) {
     case 'fileCount':
       return <span>{torrent.fileCount}</span>
     case 'downloadDir':
-      return <span className="text-footnote text-gray-500 truncate" title={torrent.downloadDir}>{torrent.downloadDir || '-'}</span>
+      return <span className="text-footnote text-gray-500 truncate" title={torrent.downloadDir}>{sem(torrent.downloadDir) || '-'}</span>
     case 'hashString':
       return <span className="text-footnote tm-mono text-gray-500 truncate" title={torrent.hashString}>{torrent.hashString}</span>
     case 'error':
@@ -166,6 +168,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
   const selectedIds = useAppStore((s) => s.selectedIds)
   const toggleSelect = useAppStore((s) => s.toggleSelect)
   const setSelection = useAppStore((s) => s.setSelection)
+  const clearSelection = useAppStore((s) => s.clearSelection)
   const selectAnchorId = useAppStore((s) => s.selectAnchorId)
   const setSelectAnchor = useAppStore((s) => s.setSelectAnchor)
   const setColumnWidth = useAppStore((s) => s.setColumnWidth)
@@ -185,6 +188,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
   const parentRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
   const dragIdRef = useRef<number | null>(null)
+  const lastClickRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 })
   const rowHeight = singleLine ? 48 : 68
 
   // 表头横向滚动与内容区同步（表头独立于虚拟滚动容器，需手动镜像 scrollLeft）
@@ -316,7 +320,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
   // 排序已统一在 useFilter（多级排序）中完成，这里直接使用过滤+排序后的列表
   const sortedTorrents = torrents
 
-  // 行点击：普通=单选，Ctrl/Cmd=切换，Shift=从锚点连选
+  // 行点击：普通=单选（再点一次已选中的唯一项则取消），Ctrl/Cmd=切换，Shift=从锚点连选
   const handleSelect = (torrent: Torrent, e: React.MouseEvent) => {
     if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
       const anchorId = selectAnchorId ?? sortedTorrents[0]?.id
@@ -331,9 +335,19 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
     }
     if (e.ctrlKey || e.metaKey) {
       toggleSelect(torrent.id)
-    } else {
-      setSelection([torrent.id])
+      setSelectAnchor(torrent.id)
+      return
     }
+    // 300ms 内同行两击是双击的前半程，不算「再点取消」，否则双击开详情时选中态会闪掉
+    const now = Date.now()
+    const repeatClick = lastClickRef.current.id === torrent.id && now - lastClickRef.current.t <= 300
+    lastClickRef.current = { id: torrent.id, t: now }
+    if (repeatClick) return
+    if (selectedIds.length === 1 && selectedIds[0] === torrent.id) {
+      clearSelection()
+      return
+    }
+    setSelection([torrent.id])
     setSelectAnchor(torrent.id)
   }
 

@@ -47,7 +47,11 @@ const DialogContent = React.forwardRef<
         {...props}
       >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 tm-hug flex h-8 w-8 items-center justify-center rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+      {/* 内联定位兜底：部分 WebView 触屏端 .tm-hug 的 position:relative 会压过 absolute 工具类 */}
+      <DialogPrimitive.Close
+        style={{ position: 'absolute', right: '1rem', top: '1rem' }}
+        className="absolute right-4 top-4 tm-hug flex h-8 w-8 items-center justify-center rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+      >
         <X className="h-4 w-4" />
         <span className="sr-only">{t('common.close')}</span>
       </DialogPrimitive.Close>

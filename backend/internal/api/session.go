@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	trpc "github.com/hekmon/transmissionrpc/v3"
 	"github.com/trpanel/backend/internal/models"
+	"github.com/trpanel/backend/internal/rpc"
 )
 
 // getSession 获取会话配置
@@ -23,7 +24,7 @@ func (h *Handler) sessionStatus(c *gin.Context) {
 	version, err := h.rpc.Client().Ping(c.Request.Context())
 	if err != nil {
 		// 该接口以 200 返回连接状态，绕过了 respondError 的统一脱敏，需自行抹掉错误里的凭据
-		respond(c, models.SessionStatus{Connected: false, Error: sanitizeClientMsg(err.Error())})
+		respond(c, models.SessionStatus{Connected: false, Error: rpc.SanitizeClientMsg(err.Error())})
 		return
 	}
 	respond(c, models.SessionStatus{Connected: true, Version: version})

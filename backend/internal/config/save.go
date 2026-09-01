@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -21,26 +22,50 @@ func ValidateEnvValue(name, value string) error {
 	return nil
 }
 
-// SaveConnection 将界面配置的连接保存到数据目录（默认 ~/.trpanel）
-func SaveConnection(dataDir, transmissionURL, user, pass, pollInterval string) error {
-	for _, f := range []struct{ name, value string }{
-		{"TR_URL", transmissionURL},
-		{"TR_USER", user},
-		{"TR_PASS", pass},
-		{"POLL_INTERVAL", pollInterval},
-	} {
-		if err := ValidateEnvValue(f.name, f.value); err != nil {
+// LocalSettings 界面保存的全部受管配置。
+// .env.local 采用整文件重写：新增受管键必须纳入此处，否则会在下一次保存时被抹掉
+type LocalSettings struct {
+	TransmissionURL string
+	User            string
+	Pass            string
+	PollInterval    string // 空 = 不写入，沿用 config.yaml / 环境变量
+	MCPEnabled      bool
+	MCPAllowDelete  bool
+	MCPToken        string // 空 = 显式关闭令牌鉴权（写入空值行，避免被 config.yaml 复活）
+}
+
+// SaveLocalSettings 将界面配置保存到数据目录（默认 ~/.trpanel）。
+// 连接与 MCP 设置共用此文件，任何入口保存都必须携带全部受管键的当前生效值
+func SaveLocalSettings(dataDir string, s LocalSettings) error {
+	values := []struct {
+		key, value string
+		always     bool // always：空值也要写入显式覆盖行，防止低优先级来源的旧值在重启后复活
+	}{
+		{"TR_URL", s.TransmissionURL, true},
+		{"TR_USER", s.User, true},
+		{"TR_PASS", s.Pass, true},
+		{"POLL_INTERVAL", s.PollInterval, false},
+		{"MCP_TOKEN", s.MCPToken, true},
+		{"MCP_ENABLED", strconv.FormatBool(s.MCPEnabled), true},
+		{"MCP_ALLOW_DELETE", strconv.FormatBool(s.MCPAllowDelete), true},
+	}
+	var content strings.Builder
+	for _, f := range values {
+		if err := ValidateEnvValue(f.key, f.value); err != nil {
 			return err
 		}
-	}
-	content := fmt.Sprintf("TR_URL=%s\nTR_USER=%s\nTR_PASS=%s\n", transmissionURL, user, pass)
-	if pollInterval != "" {
-		content += fmt.Sprintf("POLL_INTERVAL=%s\n", pollInterval)
+		if f.value == "" && !f.always {
+			continue
+		}
+		content.WriteString(f.key)
+		content.WriteString("=")
+		content.WriteString(f.value)
+		content.WriteString("\n")
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return fmt.Errorf("创建数据目录失败: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dataDir, localConfigName), []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dataDir, localConfigName), []byte(content.String()), 0o600); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
 	}
 	return nil

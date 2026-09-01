@@ -60,12 +60,64 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
+// PlanEntry 一条达标计划的对外只读快照（MCP 报告 / 预览接口用）
+type PlanEntry struct {
+	TorrentID   int64                       `json:"torrentId"`
+	TorrentName string                      `json:"torrentName"`
+	Hash        string                      `json:"hash"`
+	Site        string                      `json:"site"`
+	Rule        string                      `json:"rule"`
+	Action      string                      `json:"action"`
+	Reason      []state.SeedPolicyReasonPart `json:"reason"`
+}
+
 // Tick 执行一轮策略评估。列表接口已带 trackerStats，站点判定无需逐种拉详情。
 func (s *Service) Tick(ctx context.Context) (*Result, error) {
+	plan, err := s.plan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := &Result{Matched: len(plan)}
+	if len(plan) == 0 {
+		return result, nil
+	}
+	if !s.store.Get().SeedPolicyGuard.Enforce {
+		result.Previewed = len(plan)
+		s.persistPreview(plan)
+		return result, nil
+	}
+	s.execute(ctx, plan, result)
+	return result, nil
+}
+
+// Preview 只读评估：返回当前已达标且尚未被策略处理的种子，不执行动作、不落盘。
+// enforce 表示保护栏开关（true 时执行 Tick 会真正动作），供调用方一并展示。
+func (s *Service) Preview(ctx context.Context) ([]PlanEntry, bool, error) {
+	plan, err := s.plan(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	entries := make([]PlanEntry, 0, len(plan))
+	for _, it := range plan {
+		entries = append(entries, PlanEntry{
+			TorrentID:   it.torrent.ID,
+			TorrentName: it.torrent.Name,
+			Hash:        it.torrent.HashString,
+			Site:        it.site,
+			Rule:        it.rule.Name,
+			Action:      it.rule.Action,
+			Reason:      it.reason,
+		})
+	}
+	return entries, s.store.Get().SeedPolicyGuard.Enforce, nil
+}
+
+// plan 计算当前已达标且未处理的种子清单（不执行、不落盘）
+func (s *Service) plan(ctx context.Context) ([]planItem, error) {
 	st := s.store.Get()
 	rules := enabledRules(st.SeedPolicyRules)
 	if len(rules) == 0 {
-		return &Result{}, nil
+		return nil, nil
 	}
 	// 动作按 ID 批量下发，必须用最新列表：缓存里已被用户删掉的种子会让整批 RPC 失败
 	torrents, err := s.manager.Client().GetTorrentsFresh(ctx)
@@ -98,17 +150,7 @@ func (s *Service) Tick(ctx context.Context) (*Result, error) {
 		}
 		plan = append(plan, item)
 	}
-	result := &Result{Matched: len(plan)}
-	if len(plan) == 0 {
-		return result, nil
-	}
-	if !st.SeedPolicyGuard.Enforce {
-		result.Previewed = len(plan)
-		s.persistPreview(plan)
-		return result, nil
-	}
-	s.execute(ctx, plan, result)
-	return result, nil
+	return plan, nil
 }
 
 func enabledRules(all []state.SeedPolicyRule) []*state.SeedPolicyRule {

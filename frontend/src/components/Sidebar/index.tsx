@@ -26,6 +26,7 @@ import { useAppStore } from '@/stores/appStore'
 import { sessionApi } from '@/api/torrent'
 import { matchesStatus } from '@/hooks/useFilter'
 import { useNavRail } from '@/hooks/useNavRail'
+import { useSemanticPath } from '@/hooks/useSemanticPath'
 import { usePlatform } from '@/platform'
 import { formatBytes, formatRatio, formatSpeed } from '@/utils/format'
 import { translateError } from '@/utils/errorText'
@@ -54,6 +55,7 @@ const ERROR_TINT = { '--nav-tint': 'var(--color-red-500)' } as React.CSSProperti
 
 export const DesktopSidebar: React.FC = () => {
   const { t } = useTranslation()
+  const sem = useSemanticPath()
   const filters = useAppStore((s) => s.filters)
   const setFilters = useAppStore((s) => s.setFilters)
   const torrents = useAppStore((s) => s.torrents)
@@ -429,7 +431,7 @@ export const DesktopSidebar: React.FC = () => {
                         title={dir}
                       >
                         <FolderOpen className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                        <span className="truncate flex-1 text-left">{dir}</span>
+                        <span className="truncate flex-1 text-left">{sem(dir)}</span>
                         {groupShowSize && size > 0 && (
                           <span className="text-caption2 tm-mono text-gray-400">{formatBytes(size)}</span>
                         )}
@@ -890,6 +892,7 @@ interface MobileDrawerProps {
 export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, onOpenSettings }) => {
   const { t } = useTranslation()
   const { can } = usePlatform()
+  const sem = useSemanticPath()
   const filters = useAppStore((s) => s.filters)
   const setFilters = useAppStore((s) => s.setFilters)
   const torrentSites = useAppStore((s) => s.torrentSites)
@@ -1131,7 +1134,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                         )}
                       >
                         <FolderOpen className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                        <span className="truncate flex-1 text-left">{dir}</span>
+                        <span className="truncate flex-1 text-left">{sem(dir)}</span>
                         <span className="text-caption2 tm-mono text-gray-400">{count}</span>
                       </button>
                     )

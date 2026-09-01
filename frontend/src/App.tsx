@@ -46,7 +46,7 @@ const SWIPE_CHROME = '.tm-dock-top, .tm-dock-bottom, [role="dialog"], [role="men
 export default function App() {
   const { t, i18n } = useTranslation()
   const { isMobile } = useResponsive()
-  const { env } = usePlatform()
+  const { env, ready, can } = usePlatform()
   useWebSocket()
 
   const torrents = useAppStore((s) => s.torrents)
@@ -61,6 +61,7 @@ export default function App() {
   const setTheme = useAppStore((s) => s.setTheme)
   const setLanguage = useAppStore((s) => s.setLanguage)
   const setSession = useAppStore((s) => s.setSession)
+  const setSemanticDirs = useAppStore((s) => s.setSemanticDirs)
   const fontSize = useAppStore((s) => s.fontSize)
   const sortField = useAppStore((s) => s.sortField)
   const sortOrder = useAppStore((s) => s.sortOrder)
@@ -220,6 +221,40 @@ export default function App() {
       torrentApi.sites().then(setTorrentSites).catch(() => {})
     }
   }, [wsStatus, setTorrentSites])
+
+  // 语义路径（仅 fnOS）：把 Transmission 报上的 /vol1/... 目录转成宿主展示名。
+  // 展示属增强：不可用（旧系统/网关拦截）即本会话不再重试，避免 2s 轮询下反复打转换接口。
+  const semanticDisabledRef = useRef(false)
+  const canSemantic = ready && can('paths.semantic')
+  const semanticDirsKey = useMemo(
+    () => Array.from(new Set(torrents.map((x) => x.downloadDir).filter(Boolean))).join('\u0000'),
+    [torrents],
+  )
+
+  // 语言切换后旧映射全部失效：清空并解除不可用标记，让下方 effect 重新全量拉取
+  useEffect(() => {
+    useAppStore.getState().resetSemantic()
+    semanticDisabledRef.current = false
+  }, [language])
+
+  useEffect(() => {
+    if (!canSemantic || semanticDisabledRef.current) return
+    const known = useAppStore.getState().semanticDirs
+    const missing = (semanticDirsKey ? semanticDirsKey.split('\u0000') : []).filter((d) => !(d in known))
+    if (missing.length === 0) return
+    const timer = setTimeout(() => {
+      torrentApi
+        .semanticPaths(missing, language)
+        .then((res) => {
+          if (res.available) setSemanticDirs(res.map)
+          else semanticDisabledRef.current = true
+        })
+        .catch(() => {
+          semanticDisabledRef.current = true
+        })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [semanticDirsKey, language, canSemantic, setSemanticDirs])
 
   useEffect(() => {
     void i18n.changeLanguage(language)

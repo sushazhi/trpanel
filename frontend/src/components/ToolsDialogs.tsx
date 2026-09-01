@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
+import { useSemanticPath } from '@/hooks/useSemanticPath'
 import { useAppStore } from '@/stores/appStore'
 import { confirm } from '@/lib/confirm'
 import { toast } from '@/lib/toast'
@@ -254,6 +255,7 @@ export function BatchCleanDialog({ open, onClose }: { open: boolean; onClose: ()
 // 批量修改下载目录（含"仅移动已完成文件"选项）
 export function BatchMoveDialog({ open, ids, onClose }: { open: boolean; ids: number[]; onClose: () => void }) {
   const { t } = useTranslation()
+  const sem = useSemanticPath()
   const torrents = useAppStore((s) => s.torrents)
   const [path, setPath] = useState('')
   const [moveData, setMoveData] = useState(true)
@@ -309,7 +311,7 @@ export function BatchMoveDialog({ open, ids, onClose }: { open: boolean; ids: nu
         <div className="space-y-3">
           {currentDir && (
             <div className="text-footnote text-gray-500">
-              {t('detail.downloadDir')}: <span className="tm-mono">{currentDir}</span>
+              {t('detail.downloadDir')}: <span className="tm-mono" title={currentDir}>{sem(currentDir)}</span>
             </div>
           )}
           <div className="space-y-1">

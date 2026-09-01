@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"github.com/trpanel/backend/internal/automove"
@@ -14,6 +15,15 @@ import (
 	"github.com/trpanel/backend/internal/state"
 )
 
+// McpControl MCP 服务的运行期开关：/mcp 路由常驻注册，由此控制是否服务请求，
+// 设置界面修改后立即生效；下次启动的初值仍来自配置文件/环境变量。
+// Token 为 MCP 接入令牌（nil 或空 = 不启用鉴权），设置界面可热更新
+type McpControl struct {
+	Enabled     atomic.Bool
+	AllowDelete atomic.Bool
+	Token       atomic.Pointer[string]
+}
+
 // Handler API 处理器
 type Handler struct {
 	rpc        *rpc.Manager
@@ -25,11 +35,13 @@ type Handler struct {
 	plat       platform.Platform
 	dataDir    string
 	apiToken   string
+	mcp        *McpControl
 }
 
 // NewHandler 创建处理器。
 // plat 提供宿主平台能力：本地文件读取白名单、同源判定策略、宿主专属路由（如 fnOS 应用更新）。
-func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, moveSvc *automove.Service, policySvc *seedpolicy.Service, cfg *config.Config, plat platform.Platform) *Handler {
+// mcp 为 MCP 服务的运行期开关，与 main 中 /mcp 路由的 gate 共享同一实例。
+func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, moveSvc *automove.Service, policySvc *seedpolicy.Service, cfg *config.Config, plat platform.Platform, mcp *McpControl) *Handler {
 	return &Handler{
 		rpc:        manager,
 		hub:        hub,
@@ -40,6 +52,7 @@ func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store
 		plat:       plat,
 		dataDir:    cfg.DataDir,
 		apiToken:   cfg.APIToken,
+		mcp:        mcp,
 	}
 }
 
@@ -134,7 +147,7 @@ func respond(c *gin.Context, data interface{}) {
 }
 
 // respondError 失败响应。
-// 统一经 sanitizeClientMsg 处理：上游 RPC 错误可能内嵌带凭据的地址，不做脱敏即等于泄露密码。
+// 统一经 rpc.SanitizeClientMsg 处理：上游 RPC 错误可能内嵌带凭据的地址，不做脱敏即等于泄露密码。
 func respondError(c *gin.Context, status int, msg string) {
-	c.JSON(status, models.Error(sanitizeClientMsg(msg)))
+	c.JSON(status, models.Error(rpc.SanitizeClientMsg(msg)))
 }

@@ -5,6 +5,7 @@ import { client, request } from '@/api/client'
 import { APP_BASE } from '@/platform/appBase'
 import { serverApi, sessionApi, torrentApi, updateApi, type UpdateCheckResult, type UpdateStatus } from '@/api/torrent'
 import { AutoMoveManager } from '@/components/AutoMoveManager'
+import { McpManager } from '@/components/McpManager'
 import { SeedPolicyManager } from '@/components/SeedPolicyManager'
 import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
@@ -100,8 +101,10 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
     return cloneElement(child, { 'aria-label': label })
   })
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5">
-      <div className="min-w-0">
+    // flex-wrap：窄屏下右侧定宽控件放不下时整块掉到标签下方，
+    // 否则标签被挤成一字一行的竖排，行高爆炸（WebView 真机曾出现）
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 py-1.5">
+      <div className="min-w-[10rem] max-w-full">
         <span className="text-body text-gray-600 dark:text-gray-300">{label}</span>
         {hint && <p className="text-caption1 text-gray-400 mt-0.5">{hint}</p>}
       </div>
@@ -182,7 +185,8 @@ function DirInput({ field, 'aria-label': ariaLabel }: { field: 'downloadDir' | '
   }
 
   return (
-    <div className="flex items-center gap-1.5 w-1/2">
+    // w-full：窄屏换行到标签下方后占满整行；桌面保持半宽
+    <div className="flex items-center gap-1.5 w-full md:w-1/2">
       <Input
         aria-label={ariaLabel}
         value={draft}
@@ -505,6 +509,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const [currentServerIndex, setCurrentServerIndex] = useState(0)
   const [openMove, setOpenMove] = useState(false)
   const [openPolicy, setOpenPolicy] = useState(false)
+  const [openMcp, setOpenMcp] = useState(false)
 
   // session 仅用于「打开弹窗时」初始化 blocklist，通过 ref 读取，
   // 避免 session 变化（如 patchSession 回写）导致整个表单被重置
@@ -610,7 +615,15 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       await serverApi.save(next)
       toast.success(t('toast.updated'))
     } catch {
-      // 拦截器已提示
+      // 拦截器已提示。保存被拒时以服务端为准回读，避免本地残留后端没有的幽灵行
+      // （幽灵行一删除就是「服务器不存在」）
+      try {
+        const list = await serverApi.list()
+        setServers(list.servers)
+        setCurrentServerIndex(list.activeServer)
+      } catch {
+        // 拦截器已提示
+      }
     }
   }
 
@@ -765,7 +778,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             value={glassOpacity}
             disabled={reduceGlass}
             onChange={(e) => setGlassOpacity(Number(e.target.value))}
-            className="w-36 h-8 accent-primary disabled:opacity-40 cursor-pointer"
+            className="w-36 h-2 appearance-none disabled:opacity-40 cursor-pointer"
             aria-label={t('session.glassOpacity')}
           />
           <span className="text-footnote text-gray-400 tm-mono w-10 text-right">{glassOpacity}%</span>
@@ -900,19 +913,22 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 <Switch checked={session.altSpeedTimeEnabled} onCheckedChange={(v) => patchSession({ altSpeedTimeEnabled: v })} />
               </Row>
               {/* 周几多选（0=每天，其余为位掩码） */}
-              <div className="flex items-center justify-between gap-3 py-1.5">
-                <div className="min-w-0">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 py-1.5">
+                <div className="min-w-[10rem] max-w-full">
                   <span className="text-body text-gray-600 dark:text-gray-300">{t('session.scheduleDays')}</span>
                   <p className="text-caption1 text-gray-400 mt-0.5">{t('session.scheduleDaysHint')}</p>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 shrink-0">
                   {DAY_BITS.map((d) => {
                     const cur = session.altSpeedTimeDay
                     // 0（每天）在 UI 上等价于七天全选
                     const active = (cur === 0 ? DAY_ALL : cur) & d.bit ? true : false
+                    // div 代替 button：老 WebView 里 button 上的 flex 居中/定高不可靠
                     return (
-                      <button
+                      <div
                         key={d.bit}
+                        role="button"
+                        tabIndex={0}
                         title={t(`session.day${d.label}`)}
                         onClick={() => {
                           // 在全选（每天）状态下点击某天 = 取消那一天，而非"只选那一天"
@@ -922,33 +938,38 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                           // 七天重新全选时写回 0（每天）
                           patchSession({ altSpeedTimeDay: next === DAY_ALL ? 0 : next })
                         }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click() }
+                        }}
                         className={cn(
-                          'h-8 w-8 text-caption1 rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                          'flex h-8 w-8 shrink-0 cursor-pointer select-none items-center justify-center text-caption1 rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                           active
                             ? 'bg-primary text-primary-foreground border-primary'
                             : 'border-gray-200 dark:border-gray-700 text-gray-500 hover:border-gray-300',
                         )}
                       >
                         {t(`session.dayShort${d.label}`)}
-                      </button>
+                      </div>
                     )
                   })}
                 </div>
               </div>
               <Row label={t('session.scheduleTime')} hint={t('session.scheduleTimeHint')}>
-                <div className="flex items-center gap-1.5">
+                {/* 手机上整块占一行（w-full）让两个下拉平分宽度；桌面定宽 13rem，
+                    否则 flex-1 的下拉在自适应容器里会被压到内容最小宽度 */}
+                <div className="flex w-full items-center gap-1.5 md:w-52">
                   <SmallSelect
                     value={timeToStr(session.altSpeedTimeBegin)}
                     onValueChange={(v) => patchSession({ altSpeedTimeBegin: strToMin(v) })}
                     options={TIME_OPTIONS}
-                    className="w-24"
+                    className="flex-1"
                   />
                   <span className="text-gray-400">-</span>
                   <SmallSelect
                     value={timeToStr(session.altSpeedTimeEnd)}
                     onValueChange={(v) => patchSession({ altSpeedTimeEnd: strToMin(v) })}
                     options={TIME_OPTIONS}
-                    className="w-24"
+                    className="flex-1"
                   />
                 </div>
               </Row>
@@ -1059,7 +1080,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   spellCheck={false}
                   defaultValue={session.defaultTrackers?.join('\n')}
                   placeholder={t('common.eachLineOne')}
-                  className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-body shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="w-full max-h-32 appearance-none resize-y rounded-md border border-input bg-transparent px-3 py-2 text-body shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   onBlur={(e) => patchSession({ defaultTrackers: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
                 />
               </div>
@@ -1078,11 +1099,12 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 
         <div className="overflow-y-auto max-h-[70dvh] space-y-3 pr-1">
           {/* 连接状态 */}
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-body">{t('session.connectionStatus')}:</span>
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className="text-body shrink-0">{t('session.connectionStatus')}:</span>
             {status ? (
               status.connected ? (
-                <Badge className="bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">
+                // nowrap：版本串较长时不允许在胶囊内折行，放不下就让整个徽章换到下一行
+                <Badge className="min-w-0 max-w-full whitespace-nowrap bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">
                   {t('common.connected')}{status.version ? ` · ${status.version}` : ''}
                 </Badge>
               ) : (
@@ -1165,7 +1187,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             )}
           </Section>
 
-          {/* 自动化任务入口：自动文件管理 / 做种策略 */}
+          {/* 自动化任务入口：自动文件管理 / 做种策略 / MCP 服务（点入子弹窗设置） */}
           <Section id="automation" title={t('session.automation')}>
             <div className="space-y-2">
               <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenMove(true)}>
@@ -1173,6 +1195,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </Button>
               <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenPolicy(true)}>
                 {t('seedPolicy.title')}
+              </Button>
+              <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenMcp(true)}>
+                {t('session.mcp.title')}
               </Button>
             </div>
           </Section>
@@ -1183,10 +1208,17 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       </DialogContent>
       <AutoMoveManager open={openMove} onClose={() => setOpenMove(false)} />
       <SeedPolicyManager open={openPolicy} onClose={() => setOpenPolicy(false)} />
+      <McpManager open={openMcp} onClose={() => setOpenMcp(false)} />
     </Dialog>
   )
 }
 
 const clientGetSettings = () => client.get('/settings')
-const clientPutSettings = (body: { url: string; user: string; pass: string; pollInterval: string }) =>
-  client.put('/settings', body)
+const clientPutSettings = (body: {
+  url?: string
+  user?: string
+  pass?: string
+  pollInterval?: string
+  mcpEnabled?: boolean
+  mcpAllowDelete?: boolean
+}) => client.put('/settings', body)

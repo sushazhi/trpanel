@@ -30,7 +30,7 @@ const RULES: ErrorRule[] = [
     re: /paused torrent as no data was found/i,
     key: 'errors.pausedNoDataFound',
   },
-  // 完整句式（Transmission 会附带"设置位置/校验本地数据"的操作指引），需整句替换
+  // 完整句式（Transmission 会附带"更改下载路径/校验"的操作指引），需整句替换
   {
     re: /no data (?:was )?found!?\s*ensure your drives are connected/i,
     key: 'errors.noDataFoundHint',

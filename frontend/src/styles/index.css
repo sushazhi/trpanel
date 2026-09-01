@@ -368,6 +368,54 @@ select {
     color 0.25s var(--ease-standard), box-shadow 0.25s var(--ease-standard), transform 0.25s var(--ease-standard);
 }
 
+/* range 自绘：appearance-none 之后 Chromium/WebKit 的轨道和滑块会整体消失，必须显式补回，
+   否则滑块不可见；同时高度不再受各端原生控件差异（Android WebView 偏大）影响 */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--color-gray-200);
+}
+.dark input[type='range']::-webkit-slider-runnable-track {
+  background: var(--color-gray-700);
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: -0.375rem; /* thumb 1.25rem − track 0.5rem，相对轨道垂直居中 */
+  border-radius: 9999px;
+  background: var(--color-primary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+input[type='range']:disabled::-webkit-slider-thumb {
+  background: var(--color-gray-400);
+}
+input[type='range']::-moz-range-track {
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--color-gray-200);
+}
+.dark input[type='range']::-moz-range-track {
+  background: var(--color-gray-700);
+}
+input[type='range']::-moz-range-thumb {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: none;
+  border-radius: 9999px;
+  background: var(--color-primary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+input[type='range']:disabled::-moz-range-thumb {
+  background: var(--color-gray-400);
+}
+
 /* Selection */
 ::selection {
   background: color-mix(in srgb, var(--color-primary) 30%, transparent);
@@ -932,14 +980,18 @@ html[data-wallpaper='on'].dark .tm-shell::before {
     height: 24px;
   }
 
-  /* 命中区外扩：视觉尺寸不动，用透明 ::after 把小控件补到 HIG 的 44pt */
-  .tm-hug {
-    position: relative;
-  }
-  .tm-hug::after {
-    content: '';
-    position: absolute;
-    inset: -10px;
+  /* 命中区外扩：视觉尺寸不动，用透明 ::after 把小控件补到 HIG 的 44pt。
+     必须放进 components 层：无 layer 规则会压过 utilities 层，
+     这里的 position:relative 曾顶掉元素自身的 absolute（触屏端弹窗关闭按钮掉到左下角） */
+  @layer components {
+    .tm-hug {
+      position: relative;
+    }
+    .tm-hug::after {
+      content: '';
+      position: absolute;
+      inset: -10px;
+    }
   }
   /* 复选框：视觉升到 24px，再外扩 10px = 44pt */
   [role='checkbox'] {

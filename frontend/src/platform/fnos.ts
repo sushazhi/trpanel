@@ -7,6 +7,7 @@ const CAPABILITIES: readonly Capability[] = [
   'fs.revealPath',
   'auth.passwordless',
   'app.update',
+  'paths.semantic',
 ]
 
 // @trimjs/web-app 实际暴露的 API 子集（只导出 TrimApp 类，方法均为实例方法）

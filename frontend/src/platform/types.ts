@@ -18,6 +18,8 @@ export type Capability =
   | 'auth.passwordless'
   /** 宿主应用更新（如 fnOS 的 fpk 更新包） */
   | 'app.update'
+  /** 把内部路径（/vol1/...）批量转成宿主语义展示路径 */
+  | 'paths.semantic'
 
 export interface PickOptions {
   directory?: boolean

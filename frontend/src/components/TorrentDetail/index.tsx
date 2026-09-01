@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, File, Folder, FolderOpen, Pencil, Search } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsUpDown, File, Folder, FolderOpen, Pencil, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
 import { useRevealPath } from '@/hooks/useRevealPath'
+import { useSemanticPath } from '@/hooks/useSemanticPath'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
 import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
@@ -56,6 +57,36 @@ function collectLeaves(n: FileNode): number[] {
   return n.children ? n.children.flatMap(collectLeaves) : [n._i]
 }
 
+// ISO 国家码 → 国旗 emoji（区域指示符）；非法/未知码返回空串
+function isoToFlag(iso: string): string {
+  if (!/^[A-Za-z]{2}$/.test(iso)) return ''
+  return iso.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(127397 + ch.charCodeAt(0)))
+}
+
+let flagEmojiCache: boolean | null = null
+// Windows 字体缺国旗 emoji，会退化渲染成字母对（与国家码重复成 "US US"）；
+// canvas 像素对比探测一次：旗帜与两个字母渲染一致即视为不支持
+function flagEmojiSupported(): boolean {
+  if (flagEmojiCache !== null) return flagEmojiCache
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 20
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return (flagEmojiCache = false)
+    ctx.textBaseline = 'top'
+    ctx.font = '16px sans-serif'
+    const draw = (text: string) => {
+      ctx.clearRect(0, 0, 20, 20)
+      ctx.fillText(text, 0, 0)
+      return ctx.getImageData(0, 0, 20, 20).data.join(',')
+    }
+    flagEmojiCache = draw('🇺🇸') !== draw('US')
+  } catch {
+    flagEmojiCache = false
+  }
+  return flagEmojiCache
+}
+
 // ========== 详情信息网格（替代 antd Descriptions） ==========
 function InfoGrid({ items }: { items: { key: string; label: string; children: React.ReactNode }[] }) {
   return (
@@ -107,7 +138,9 @@ function FileRow({ node, depth, wanted, priorities, selectedRows, onToggleFile, 
     <>
       <div
         className={cn(
-          'group flex items-center gap-2 px-2 py-1.5 text-footnote border-b border-gray-100/70 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50',
+          // flex-wrap：窄屏定宽列（大小/进度/勾选/优先级）占满整行时折到第二行，
+          // 保住文件名的最小宽度，而不是把它压成 0
+          'group flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 text-footnote border-b border-gray-100/70 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50',
           selectedRows.has(node._i) && 'bg-primary/5',
         )}
         style={{ paddingLeft: depth * 20 + 8 }}
@@ -122,7 +155,8 @@ function FileRow({ node, depth, wanted, priorities, selectedRows, onToggleFile, 
         {isDir
           ? (open ? <FolderOpen className="w-3.5 h-3.5 text-primary/70 shrink-0" /> : <Folder className="w-3.5 h-3.5 text-primary/70 shrink-0" />)
           : <File className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
-        <span className="truncate flex-1" title={node.path}>{node.name}</span>
+        {/* min-w：flex-1(basis 0) 在定宽列挤占下会塌缩到 0，真机上文件名因此不可见 */}
+        <span className="min-w-[8rem] flex-1 truncate" title={node.path}>{node.name}</span>
         <button
           onClick={() => onRename(node)}
           className="p-2 -m-2 rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-gray-400 hover:text-primary shrink-0 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -184,25 +218,62 @@ interface TableColumn<T> {
   title: string
   render: (row: T) => React.ReactNode
   className?: string
+  // 排序键；未设置则该列不可排序
+  sortValue?: (row: T) => string | number
 }
 
 function SimpleTable<T>({ columns, data, emptyText }: { columns: TableColumn<T>[]; data: T[]; emptyText?: string }) {
   const { t } = useTranslation()
+  const [sort, setSort] = useState<{ key: string; asc: boolean } | null>(null)
+
+  const sorted = useMemo(() => {
+    if (!sort) return data
+    const get = columns.find((c) => c.key === sort.key)?.sortValue
+    if (!get) return data
+    return [...data].sort((a, b) => {
+      const va = get(a)
+      const vb = get(b)
+      const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb))
+      return sort.asc ? cmp : -cmp
+    })
+  }, [data, columns, sort])
+
   if (data.length === 0) {
     return <div className="text-center text-gray-400 text-body py-8">{emptyText ?? t('common.empty')}</div>
   }
+
+  const toggleSort = (key: string) =>
+    setSort((s) => (s?.key === key ? { key, asc: !s.asc } : { key, asc: true }))
+
+  const sortIcon = (c: TableColumn<T>) => {
+    if (!c.sortValue) return null
+    if (sort?.key === c.key) {
+      return sort.asc
+        ? <ChevronUp className="w-3 h-3 ml-0.5 text-primary" />
+        : <ChevronDown className="w-3 h-3 ml-0.5 text-primary" />
+    }
+    return <ChevronsUpDown className="w-3 h-3 ml-0.5 opacity-30" />
+  }
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-footnote">
         <thead>
           <tr className="border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
             {columns.map((c) => (
-              <th key={c.key} className={cn('text-left font-medium px-2 py-1.5 whitespace-nowrap', c.className)}>{c.title}</th>
+              <th
+                key={c.key}
+                onClick={c.sortValue ? () => toggleSort(c.key) : undefined}
+                className={cn('text-left font-medium px-2 py-1.5 whitespace-nowrap', c.sortValue && 'cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200', c.className)}
+              >
+                {c.title}
+                {sortIcon(c)}
+              </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {data.map((row, idx) => (
+          {sorted.map((row, idx) => (
             <tr key={idx} className="border-b border-gray-100/70 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
               {columns.map((c) => (
                 <td key={c.key} className={cn('px-2 py-1.5 whitespace-nowrap', c.className)}>{c.render(row)}</td>
@@ -347,6 +418,7 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
   const { t } = useTranslation()
   const { can } = usePlatform()
   const revealPath = useRevealPath()
+  const sem = useSemanticPath()
   const actions = useTorrentActions()
   const [detail, setDetail] = useState<Torrent | null>(null)
   const [loading, setLoading] = useState(false)
@@ -452,7 +524,7 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
       { key: 'labels', label: t('detail.labels'), children: detail.labels?.length ? detail.labels.join(', ') : '-' },
       { key: 'private', label: t('detail.private'), children: detail.isPrivate ? t('common.yes') : t('common.no') },
       { key: 'mainTracker', label: t('detail.mainTracker'), children: detail.trackerStats?.[0]?.host || detail.trackerStats?.[0]?.announce || '-' },
-      { key: 'dir', label: t('detail.downloadDir'), children: detail.downloadDir || '-' },
+      { key: 'dir', label: t('detail.downloadDir'), children: sem(detail.downloadDir) || '-' },
       { key: 'creator', label: t('detail.creator'), children: detail.creator || '-' },
       { key: 'comment', label: t('detail.comment'), children: detail.comment || '-' },
       { key: 'added', label: t('detail.addedDate'), children: formatDate(detail.addedDate) },
@@ -460,7 +532,7 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
       { key: 'activity', label: t('detail.activityDate'), children: formatDate(detail.activityDate) },
       { key: 'hash', label: t('detail.hash'), children: detail.hashString || '-' },
     ]
-  }, [detail, t])
+  }, [detail, t, sem])
 
   // 文件树（目录聚合）
   const fileTree = useMemo<FileNode[]>(() => {
@@ -597,15 +669,16 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
   ]
 
   const peerColumns: TableColumn<Record<string, unknown>>[] = [
-    { key: 'address', title: t('detail.peerAddress'), render: (p) => <span>{(p.address as string) || '-'}</span> },
+    { key: 'address', title: t('detail.peerAddress'), render: (p) => <span>{(p.address as string) || '-'}</span>, sortValue: (p) => (p.address as string) || '' },
     {
       key: 'location',
       title: t('detail.peerLocation'),
       render: (p) => {
-        const loc = geoMap[p.address as string]
-        const parts = [loc?.country, loc?.city].filter(Boolean)
-        return <span>{parts.length ? parts.join(' / ') : '-'}</span>
+        const code = (geoMap[p.address as string]?.country || '').toUpperCase()
+        const flag = flagEmojiSupported() ? isoToFlag(code) : ''
+        return <span>{flag ? `${flag} ${code}` : code || '-'}</span>
       },
+      sortValue: (p) => (geoMap[p.address as string]?.country || '').toUpperCase(),
     },
     {
       key: 'connection',
@@ -618,15 +691,21 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
         if (uploading) return <span className="text-blue-600 dark:text-blue-400">{t('detail.peerUploading')}</span>
         return <span className="text-gray-400">{t('detail.peerIdle')}</span>
       },
+      // 排序顺序：双向 → 下载中 → 上传中 → 空闲
+      sortValue: (p) => {
+        const downloading = !!p.isDownloadingFrom
+        const uploading = !!p.isUploadingTo
+        return downloading && uploading ? 0 : downloading ? 1 : uploading ? 2 : 3
+      },
     },
-    { key: 'clientName', title: t('detail.peerClient'), render: (p) => <span>{(p.clientName as string) || '-'}</span> },
-    { key: 'progress', title: t('detail.peerProgress'), render: (p) => formatPercent(p.progress as number) },
-    { key: 'down', title: t('detail.peerDown'), render: (p) => <span className="text-green-600 dark:text-green-400">{formatSpeed(p.rateToClient as number)}</span> },
-    { key: 'up', title: t('detail.peerUp'), render: (p) => <span className="text-blue-600 dark:text-blue-400">{formatSpeed(p.rateToPeer as number)}</span> },
+    { key: 'clientName', title: t('detail.peerClient'), render: (p) => <span>{(p.clientName as string) || '-'}</span>, sortValue: (p) => (p.clientName as string) || '' },
+    { key: 'progress', title: t('detail.peerProgress'), render: (p) => formatPercent(p.progress as number), sortValue: (p) => (p.progress as number) || 0 },
+    { key: 'down', title: t('detail.peerDown'), render: (p) => <span className="text-green-600 dark:text-green-400">{formatSpeed(p.rateToClient as number)}</span>, sortValue: (p) => (p.rateToClient as number) || 0 },
+    { key: 'up', title: t('detail.peerUp'), render: (p) => <span className="text-blue-600 dark:text-blue-400">{formatSpeed(p.rateToPeer as number)}</span>, sortValue: (p) => (p.rateToPeer as number) || 0 },
     { key: 'flags', title: t('detail.peerFlags'), render: (p) => <span>{p.flagStr as string}</span> },
   ]
 
-  // Tracker 状态（工作中/超时/失败/未通告）
+  // Tracker 状态（工作中/超时/失败/未汇报）
   const renderTrackerStatus = (r: Record<string, unknown>) => {
     if (r.lastAnnounceTimedOut) return <span className="text-yellow-600 dark:text-yellow-400">{t('detail.trackerStatusTimeout')}</span>
     if (r.lastAnnounceSucceeded) return <span className="text-green-600 dark:text-green-400">{t('detail.trackerStatusOk')}</span>
@@ -641,8 +720,16 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
     { key: 'leechers', title: t('detail.trackerLeechers'), render: (r) => r.leecherCount as number },
     { key: 'last', title: t('detail.trackerLastAnnounce'), render: (r) => (r.lastAnnounceTime ? formatDate(r.lastAnnounceTime as number) : '-') },
     { key: 'next', title: t('detail.trackerNextAnnounce'), render: (r) => (r.nextAnnounceTime ? formatDate(r.nextAnnounceTime as number) : '-') },
-    { key: 'scrape', title: t('detail.trackerLastScrape'), render: (r) => (r.lastScrapeTime ? formatDate(r.lastScrapeTime as number) : '-') },
-    { key: 'scrapeResult', title: t('detail.trackerScrapeResult'), render: (r) => (r.lastScrapeSucceeded ? 'OK' : ((r.lastScrapeResult as string) || '-')) },
+    {
+      key: 'scrape',
+      title: t('detail.trackerScrape'),
+      render: (r) => {
+        const result = r.lastScrapeSucceeded ? 'OK' : ((r.lastScrapeResult as string) || '')
+        const time = r.lastScrapeTime ? formatDate(r.lastScrapeTime as number) : ''
+        if (!result && !time) return '-'
+        return [result, time].filter(Boolean).join(' · ')
+      },
+    },
   ]
 
   const closeDetail = () => { onClose(); onOpenChange?.(false) }
@@ -704,8 +791,8 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
             <Button size="sm" className="h-8 text-footnote" disabled={loading} onClick={saveFiles}>{t('common.save')}</Button>
           </div>
 
-          {/* 文件表头 */}
-          <div className="flex items-center gap-2 px-2 py-1.5 text-footnote text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 font-medium">
+          {/* 文件表头：手机端行会折行，列对不上，只在桌面显示 */}
+          <div className="hidden md:flex items-center gap-2 px-2 py-1.5 text-footnote text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700 font-medium">
             <span className="flex-1">{t('detail.fileName')}</span>
             <span className="w-16 text-right">{t('detail.fileSize')}</span>
             <span className="w-20">{t('detail.fileProgress')}</span>

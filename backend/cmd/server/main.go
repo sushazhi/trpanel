@@ -23,6 +23,7 @@ import (
 	"github.com/trpanel/backend/internal/api"
 	"github.com/trpanel/backend/internal/automove"
 	"github.com/trpanel/backend/internal/config"
+	"github.com/trpanel/backend/internal/mcpserver"
 	"github.com/trpanel/backend/internal/middleware"
 	"github.com/trpanel/backend/internal/platform"
 	// 空导入即完成 fnOS 平台注册；不导入时服务自动降级为通用部署
@@ -94,11 +95,44 @@ func main() {
 	hub := api.NewHub(manager, cfg.PollInterval, plat)
 	moveSvc := automove.New(manager, store)
 	policySvc := seedpolicy.New(manager, store)
-	handler := api.NewHandler(manager, hub, geo, store, moveSvc, policySvc, cfg, plat)
+	// MCP 运行期开关：设置界面修改后即时生效，下次启动的初值来自配置
+	mcpCtl := &api.McpControl{}
+	mcpCtl.Enabled.Store(cfg.MCPEnabled)
+	mcpCtl.AllowDelete.Store(cfg.MCPAllowDelete)
+	if cfg.MCPToken != "" {
+		t := cfg.MCPToken
+		mcpCtl.Token.Store(&t)
+	}
+	handler := api.NewHandler(manager, hub, geo, store, moveSvc, policySvc, cfg, plat, mcpCtl)
 	handler.Register(r, gatewayPrefix)
 	hub.Start(ctx)
 	go moveSvc.Run(ctx)
 	go policySvc.Run(ctx)
+
+	// MCP：把种子管理能力以工具形式暴露给 AI 客户端（streamable HTTP + 令牌鉴权）。
+	// 路由常驻注册，gate 在鉴权之前拦截关闭状态——按 404 处理，不暴露端点存在性；
+	// 接入令牌与 API_TOKEN 相互独立，仅作用于 /mcp，可在设置界面热更新
+	mcpHandler := mcpserver.New(manager, policySvc, store, plat, &mcpCtl.AllowDelete, hub.Bump).Handler()
+	mcpGuards := []gin.HandlerFunc{func(c *gin.Context) {
+		if !mcpCtl.Enabled.Load() {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		c.Next()
+	}, middleware.SameOriginWriteGuard(plat), middleware.DynamicAuth(func() string {
+		if t := mcpCtl.Token.Load(); t != nil {
+			return *t
+		}
+		return ""
+	})}
+	r.Any(gatewayPrefix+"/mcp", append(mcpGuards, gin.WrapH(mcpHandler))...)
+	if cfg.MCPEnabled {
+		slog.Info("MCP 服务已启用", "endpoint", gatewayPrefix+"/mcp",
+			"tokenAuth", cfg.MCPToken != "", "allowDelete", cfg.MCPAllowDelete)
+	}
+	if cfg.MCPToken == "" && cfg.MCPEnabled {
+		slog.Warn("MCP 未启用令牌鉴权，任何可达本服务的客户端均可通过 MCP 工具控制 Transmission")
+	}
 
 	// 内嵌前端静态资源（SPA）
 	serveStatic(r, plat.GatewayPrefix())

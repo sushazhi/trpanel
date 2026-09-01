@@ -68,6 +68,9 @@ export const torrentApi = {
   // Peer 地理位置查询（批量）
   peersGeo: (ips: string[]) =>
     request<Record<string, { country: string; city: string }>>(client.post('/peers/geo', { ips })),
+  // 语义路径批量转换（fnOS：内部路径 → 宿主展示路径；不可用时 available=false，前端回退原始路径）
+  semanticPaths: (paths: string[], language: 'zh' | 'en') =>
+    request<{ available: boolean; map: Record<string, string> }>(client.post('/paths/semantic', { paths, language })),
 }
 
 // 系统命令

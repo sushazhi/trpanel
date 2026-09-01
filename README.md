@@ -11,7 +11,7 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
 [![PWA](https://img.shields.io/badge/PWA-Ready-5A0FC8?style=flat-square&logo=pwa&logoColor=white)]()
 [![fnOS](https://img.shields.io/badge/Optimized%20for-fnOS-FF6B35?style=flat-square)]()
-[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
 [![Release](https://img.shields.io/badge/release-v0.1.0-blue?style=flat-square)](../../releases)
 [![Docker](https://img.shields.io/badge/GHCR-trpanel-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/sushazhi/trpanel/pkgs/container/trpanel)
 
@@ -33,6 +33,7 @@
 | 🌐 | **会话与全局** | 多服务器切换、全局限速、带宽定时调度、下载 / 做种队列、轮询间隔 |
 | 🛠 | **工具集** | 浏览器端 `.torrent` 创建（bencode + 分片 SHA1）、按分享率 / 做种时长批量清理已完成种子 |
 | 🤖 | **自动化** | 已完成种子按站点归档；**做种策略**按站点分享率 / 做种天数 / 上传量目标达标后暂停 / 删除 / 删除并清理文件 |
+| 🤝 | **MCP 服务** | 内置 MCP 端点（`/mcp`），Claude / Qoder 等 AI 客户端可直接查询种子、做种策略达标报告并执行添加 / 启停操作；「设置 → 自动化 → MCP 服务」开启，独立接入令牌鉴权，删除默认关闭 |
 | 📈 | **图表统计** | 速度历史曲线 + 统计仪表盘 |
 | 📲 | **PWA** | 可安装、离线缓存、新版本更新提示、键盘快捷键（`N` / `Space` / `Delete` / `Ctrl+A` / `/` / `Esc` / `Ctrl±`） |
 | 🎨 | **外观** | 明 / 暗主题、中 / 英文、**可调玻璃浓度**、**背景壁纸**（作为玻璃折射色源形成色彩流动） |
@@ -97,12 +98,12 @@ API_TOKEN=change-me docker compose up -d
 |:--|:--|
 | 镜像 | `ghcr.io/sushazhi/trpanel` |
 | 架构 | `linux/amd64`、`linux/arm64` |
-| 标签 | `v1.2.3`（与仓库 Git 标签完全一致）、`latest`（当前最新版本的镜像）、`master`（主分支最新构建） |
+| 标签 | `v1.2.3`（与仓库 Git 标签完全一致）、`latest`（当前最新版本的镜像） |
 | 数据卷 | `/data`（即 `TM_DATA_DIR`，存放 `tm-state.json` 与界面保存的连接配置） |
 | 健康检查 | `GET /` 每 30s |
 
 > ⚠️ 容器内 `SERVER_HOST=0.0.0.0`，**未设置 `API_TOKEN` 时服务会拒绝启动**（防止局域网裸奔）；令牌在浏览器首次访问时粘贴一次即可，之后持久化在本地。
-> 镜像由 [Docker 工作流](.github/workflows/docker.yml)自动构建发布：推送 `master` 或 `v*` 标签即触发多架构构建；PR 只验证构建不推送。GHCR 包首次发布后需在仓库 **Packages → Package settings** 中把可见性改为 Public，才能匿名拉取。
+> 镜像由 [Docker 工作流](.github/workflows/docker.yml)自动构建发布：仅推送 `v*` 标签触发多架构构建；PR 只验证构建不推送。GHCR 包首次发布后需在仓库 **Packages → Package settings** 中把可见性改为 Public，才能匿名拉取。
 
 #### 🇨🇳 国内加速拉取
 
@@ -329,6 +330,34 @@ dev/
 
 新增一套宿主只需：后端实现 `platform.Platform` 接口并在 `init` 中 `Register`，前端实现 `HostPlatform` 接口并声明能力——**业务代码一行都不用改**。
 
+### MCP（AI 客户端接入）
+
+trpanel 内置 MCP（Model Context Protocol）服务，AI 客户端可通过自然语言管理 Transmission。推荐直接在 Web「设置 → 自动化 → MCP 服务」中开启并配置（即时生效，保存后写入 `.env.local`）；也可在配置文件中设置启动初值：
+
+```yaml
+mcp_enabled: true        # 启用 MCP 端点 /mcp
+mcp_allow_delete: false  # 删除类工具默认关闭，需显式开启
+mcp_token: ""            # 接入令牌，留空 = 不启用鉴权
+```
+
+客户端接入示例（Claude Desktop / Qoder / Cursor 等支持 streamable HTTP 的 MCP 客户端）：
+
+```json
+{
+  "mcpServers": {
+    "trpanel": {
+      "url": "http://192.168.1.10:8200/mcp",
+      "headers": { "Authorization": "Bearer <你的 MCP 接入令牌>" }
+    }
+  }
+}
+```
+
+- **鉴权**：`/mcp` 使用独立接入令牌 `MCP_TOKEN`（与 `API_TOKEN` 互不相干），在 Web「设置 → 自动化 → MCP 服务」中即可配置，修改后即时生效——记得同步更新 AI 客户端配置；留空表示不启用鉴权，此时仅建议在回环 / 内网环境使用。飞牛应用经统一网关访问界面（登录态即鉴权），但外部 AI 客户端无法通过网关鉴权——需直连服务端口
+- **只读工具**：`list_torrents`（关键词 / 状态 / 站点过滤）、`get_torrent`、`get_stats`、`get_seed_policy_report`（做种策略规则 + 已达标未处理的种子与依据，只读评估不会执行动作）
+- **写操作工具**：`add_torrent`（磁力 / URL / 白名单路径，默认以暂停状态添加）、`start_torrents`、`stop_torrents`
+- **删除工具**：`remove_torrents`（`deleteData=true` 连同本地文件）仅在设置界面「允许通过 MCP 删除种子」（即 `mcp_allow_delete: true`）开启时可用
+
 ### 进阶
 
 - **PWA 安装**：手机浏览器或桌面 Chrome / Edge 选择「添加到主屏幕 / 安装应用」，可全屏使用并离线缓存，有新版本会提示刷新
@@ -348,13 +377,16 @@ dev/
 | `TR_PASS` | 空 | RPC 密码 |
 | `SERVER_PORT` | `8200` | 本服务端口 |
 | `SERVER_HOST` | `127.0.0.1` | 监听地址（非回环地址需配置 `API_TOKEN`） |
-| `API_TOKEN` | 空 | 接口访问令牌；非空时浏览器首次访问弹出令牌输入框 |
+| `API_TOKEN` | 空 | REST 接口访问令牌（不含 `/mcp`）；非空时浏览器首次访问弹出令牌输入框 |
 | `POLL_INTERVAL` | `2s` | WebSocket 轮询间隔 |
 | `LOG_LEVEL` | `info` | 日志级别 |
 | `TM_PLATFORM` | 自动推断 | 宿主平台：`generic`（默认） / `fnos` |
 | `GATEWAY_PREFIX` | 空 | 宿主网关挂载的 URL 前缀（如 `/app/transmission`） |
 | `TORRENT_PATH_ROOTS` | `/vol,/mnt,/media,/volume1` | 「按路径添加种子」允许读取的根目录（逗号分隔；按解析符号链接后的真实路径判定，仅允许普通文件） |
 | `SERVER_SOCKET` | 空 | Unix socket 监听路径（宿主网关接入用） |
+| `MCP_ENABLED` | `false` | 启用 MCP 服务（`/mcp` 端点，供 AI 客户端接入） |
+| `MCP_ALLOW_DELETE` | `false` | 允许通过 MCP 删除种子（`deleteData=true` 时连同本地文件） |
+| `MCP_TOKEN` | 空 | MCP 接入令牌（独立于 `API_TOKEN`，仅作用于 `/mcp`）；留空 = 不启用鉴权 |
 
 配置优先级：**环境变量 > `.env.local` > `.env` > `config.yaml` > 默认值**
 在界面「设置」中保存连接会写入 `.env.local` 并热更新，无需重启。

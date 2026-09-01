@@ -41,7 +41,7 @@ export function SessionPanel() {
     <div className="space-y-4">
       {/* 带宽控制 */}
       <div>
-        <div className="text-footnote font-semibold text-gray-400 mb-1">{t('session.title')}</div>
+        <div className="text-footnote font-semibold text-gray-400 mb-1">{t('session.bandwidth')}</div>
         <div className={row}>
           <span className={label}>{t('session.altSpeed')}</span>
           <Switch

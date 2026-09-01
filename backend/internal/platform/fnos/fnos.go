@@ -22,6 +22,7 @@ type Platform struct {
 	prefix     string
 	fileAccess platform.FileAccess
 	update     *updateHandler
+	paths      *pathHandler
 }
 
 // New 构造 fnOS 平台
@@ -32,6 +33,7 @@ func New(cfg platform.Config) platform.Platform {
 		// 配置 FILE_ALLOWED_PREFIXES 后可把范围收紧到指定目录，不影响其它能力。
 		fileAccess: platform.NewFileAccess(true, cfg.FileAllowedPrefixes),
 		update:     newUpdateHandler(),
+		paths:      &pathHandler{tc: newTrimPathClient()},
 	}
 	return p
 }
@@ -57,7 +59,8 @@ func (p *Platform) SecurityPolicy() platform.SecurityPolicy {
 
 func (p *Platform) FileAccess() platform.FileAccess { return p.fileAccess }
 
-// RegisterRoutes 挂载 fnOS 专属接口：应用更新（GitHub Release + fpk）
+// RegisterRoutes 挂载 fnOS 专属接口：应用更新（GitHub Release + fpk）、语义路径转换
 func (p *Platform) RegisterRoutes(g *gin.RouterGroup) {
 	p.update.RegisterRoutes(g)
+	g.POST("/paths/semantic", p.paths.convert)
 }

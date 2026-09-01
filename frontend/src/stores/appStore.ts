@@ -72,6 +72,8 @@ export interface AppState {
   session: Session | null
   wsStatus: 'connecting' | 'connected' | 'disconnected'
   torrentSites: Record<number, string[]>
+  // 语义路径映射（原始路径 → 宿主展示名，仅 fnOS；不持久化，随语言切换重建）
+  semanticDirs: Record<string, string>
   fontSize: number
   singleLine: boolean
   // 种子行首的选择框是否显示（关闭后列表更紧凑，仍可用 Ctrl/Shift 点选）
@@ -108,6 +110,8 @@ export interface AppState {
   setSingleLine: (v: boolean) => void
   setShowCheckboxes: (v: boolean) => void
   setTorrentSites: (s: Record<number, string[]>) => void
+  setSemanticDirs: (patch: Record<string, string>) => void
+  resetSemantic: () => void
   setWsStatus: (s: AppState['wsStatus']) => void
   setTorrents: (list: Torrent[]) => void
   toggleSelect: (id: number) => void
@@ -156,6 +160,7 @@ export const useAppStore = create<AppState>()(
       session: null,
       wsStatus: 'connecting',
       torrentSites: {},
+      semanticDirs: {},
       fontSize: 16,
       singleLine: true,
       showCheckboxes: true,
@@ -180,6 +185,8 @@ export const useAppStore = create<AppState>()(
       setSingleLine: (v) => set({ singleLine: v }),
       setShowCheckboxes: (v) => set({ showCheckboxes: v }),
       setTorrentSites: (s) => set({ torrentSites: s }),
+      setSemanticDirs: (patch) => set((state) => ({ semanticDirs: { ...state.semanticDirs, ...patch } })),
+      resetSemantic: () => set({ semanticDirs: {} }),
       setWsStatus: (s) => set({ wsStatus: s }),
       setTorrents: (list) => set({ torrents: list }),
       toggleSelect: (id) =>
