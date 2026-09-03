@@ -9,6 +9,7 @@ import { Dashboard } from '@/components/Dashboard'
 import { DesktopSidebar, MobileDrawer, STATUS_ITEMS } from '@/components/Sidebar'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { SettingsModal } from '@/components/SettingsModal'
+import { SpeedPolicyManager } from '@/components/SpeedPolicyManager'
 import { StatusBar } from '@/components/StatusBar'
 import { TorrentDetail } from '@/components/TorrentDetail'
 import { TorrentList } from '@/components/TorrentList'
@@ -73,6 +74,9 @@ export default function App() {
   const glassOpacity = useAppStore((s) => s.glassOpacity)
   const wallpaper = useAppStore((s) => s.wallpaper)
   const a11yTouched = useAppStore((s) => s.a11yTouched)
+  const speedOpen = useAppStore((s) => s.speedOpen)
+  const speedPreset = useAppStore((s) => s.speedPreset)
+  const closeSpeedPolicy = useAppStore((s) => s.closeSpeedPolicy)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -429,6 +433,8 @@ export default function App() {
       <BatchCleanDialog open={cleanOpen} onClose={() => setCleanOpen(false)} />
       <TorrentDetail torrent={detailTorrent} onClose={() => setDetailTorrent(null)} onOpenChange={(open) => { if (!open) setDetailTorrent(null) }} isMobile={isMobile} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {/* 组内总限速：设置页与侧边栏分组右键共用同一实例 */}
+      <SpeedPolicyManager open={speedOpen} onClose={closeSpeedPolicy} preset={speedPreset} />
       <PwaUpdatePrompt />
       <AppUpdatePrompt />
       <AuthTokenDialog />

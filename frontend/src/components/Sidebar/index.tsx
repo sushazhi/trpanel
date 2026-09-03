@@ -9,6 +9,7 @@ import {
   ChevronDown,
   CloudDownload,
   FolderOpen,
+  Gauge,
   Globe,
   HardDrive,
   Layers,
@@ -80,6 +81,12 @@ export const DesktopSidebar: React.FC = () => {
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const [submenuOpen, setSubmenuOpen] = useState(false)
+  // 分组项右键：站点 / 标签 → 快速新建组内总限速规则
+  const [groupCtx, setGroupCtx] = useState<{ x: number; y: number; kind: 'site' | 'label'; value: string } | null>(null)
+  const groupLimit = (kind: 'site' | 'label', value: string) => {
+    setGroupCtx(null)
+    useAppStore.getState().openSpeedPolicy(kind === 'site' ? { sites: [value] } : { labels: [value] })
+  }
   // 子菜单延迟关闭：光标短暂离开一级菜单（含 4px 间隙）时不闪退
   const submenuTimer = useRef<number | null>(null)
   const closeSubmenuSoon = () => {
@@ -468,6 +475,11 @@ export const DesktopSidebar: React.FC = () => {
                         onDoubleClick={() =>
                           dblSelect(torrents.filter((t) => t.labels?.includes(label)).map((t) => t.id))
                         }
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setGroupCtx({ x: e.clientX, y: e.clientY, kind: 'label', value: label })
+                        }}
                         className={cn(
                           'tm-chip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-body font-medium transition-all tm-nav-item',
                           isActive ? 'scale-105' : 'opacity-90 hover:opacity-100',
@@ -561,6 +573,7 @@ export const DesktopSidebar: React.FC = () => {
                 groupShowSize={groupShowSize}
                 collapsed={sidebarCollapsed.sites}
                 onToggle={() => setSidebarCollapsed({ sites: !sidebarCollapsed.sites })}
+                onGroupMenu={(name, x, y) => setGroupCtx({ x, y, kind: 'site', value: name })}
               />
             </div>
           )}
@@ -676,6 +689,33 @@ export const DesktopSidebar: React.FC = () => {
           </div>
         </>
       )}
+
+      {/* 站点 / 标签分组项右键：快速新建组内总限速规则 */}
+      {groupCtx && (
+        <>
+          <div
+            className="fixed inset-0 z-50"
+            onClick={() => setGroupCtx(null)}
+            onContextMenu={(e) => { e.preventDefault(); setGroupCtx(null) }}
+          />
+          <div
+            className="fixed z-50 min-w-56 rounded-tile glass-panel-strong p-1"
+            role="menu"
+            style={{ left: Math.min(groupCtx.x, window.innerWidth - 240), top: Math.min(groupCtx.y, window.innerHeight - 120) }}
+          >
+            <div className="px-3 py-1.5 text-footnote text-gray-400 truncate max-w-[224px]" title={groupCtx.value}>
+              {groupCtx.kind === 'site' ? t('site.nav') : t('nav.labels')}: {groupCtx.value}
+            </div>
+            <button
+              onClick={() => groupLimit(groupCtx.kind, groupCtx.value)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-footnote text-left text-gray-700 dark:text-gray-200 hover:bg-white/60 dark:hover:bg-white/10"
+            >
+              <Gauge className="w-3.5 h-3.5 text-primary shrink-0" />
+              {t('sidebar.groupLimit')}
+            </button>
+          </div>
+        </>
+      )}
     </aside>
   )
 }
@@ -749,9 +789,11 @@ interface SiteNavProps {
   groupShowSize: boolean
   collapsed: boolean
   onToggle: () => void
+  // 站点行右键 → 新建组内总限速（name 为站点名，x/y 为菜单落点）
+  onGroupMenu?: (name: string, x: number, y: number) => void
 }
 
-const SiteNav: React.FC<SiteNavProps> = ({ sites, siteStats, currentSiteIds, onSelect, onDblSelect, groupShowSize, collapsed, onToggle }) => {
+const SiteNav: React.FC<SiteNavProps> = ({ sites, siteStats, currentSiteIds, onSelect, onDblSelect, groupShowSize, collapsed, onToggle, onGroupMenu }) => {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
 
@@ -831,6 +873,12 @@ const SiteNav: React.FC<SiteNavProps> = ({ sites, siteStats, currentSiteIds, onS
                   key={site.id}
                   onClick={() => onSelect(String(site.id))}
                   onDoubleClick={() => onDblSelect(String(site.id))}
+                  onContextMenu={(e) => {
+                    if (!onGroupMenu) return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onGroupMenu(String(site.id), e.clientX, e.clientY)
+                  }}
                   className={cn(
                     'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
                     isActive

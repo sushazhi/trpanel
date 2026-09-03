@@ -1,5 +1,5 @@
 import { client, request } from './client'
-import type { AutoMoveRule, SeedPolicyGuard, SeedPolicyLog, SeedPolicyResult, SeedPolicyRule, ServerInfo, Session, SessionStats, SessionStatus, Torrent } from '@/types'
+import type { AutoMoveRule, SeedPolicyGuard, SeedPolicyLog, SeedPolicyResult, SeedPolicyRule, ServerInfo, Session, SessionStats, SessionStatus, SpeedPolicyGuard, SpeedPolicyResult, SpeedPolicyRule, Torrent } from '@/types'
 
 // 种子相关接口
 export const torrentApi = {
@@ -115,6 +115,15 @@ export const seedPolicyApi = {
   run: () => request<{ result: SeedPolicyResult; at: number }>(client.post('/seedpolicy/run')),
   reset: () => request<{ cleared: number }>(client.post('/seedpolicy/reset')),
   clearLogs: () => request<{ cleared: boolean }>(client.post('/seedpolicy/clear-logs')),
+}
+
+// 组内总限速：按站点 / 标签 / 名称分组的共享带宽上限
+export const speedPolicyApi = {
+  list: () => request<{ rules: SpeedPolicyRule[]; guard: SpeedPolicyGuard }>(client.get('/speedpolicy')),
+  save: (rule: SpeedPolicyRule) => request<{ id: string }>(client.post('/speedpolicy', rule)),
+  remove: (id: string) => request(client.delete(`/speedpolicy/${id}`)),
+  saveGuard: (guard: SpeedPolicyGuard) => request<{ saved: boolean }>(client.post('/speedpolicy/guard', guard)),
+  run: () => request<{ result: SpeedPolicyResult; at: number }>(client.post('/speedpolicy/run')),
 }
 
 // 检查更新（飞牛部署：后端查 GitHub Releases，gh-proxy 回退下载 fpk 更新包）

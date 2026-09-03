@@ -101,6 +101,12 @@ export interface AppState {
   // 背景壁纸（data URL，空串 = 关闭）。玻璃折射的主要色源
   wallpaper: string
 
+  // 组内总限速管理弹窗（跨组件打开：侧边栏分组右键 → 预填站点/标签）
+  speedOpen: boolean
+  speedPreset: { sites: string[]; labels: string[] } | null
+
+  openSpeedPolicy: (preset?: { sites?: string[]; labels?: string[] }) => void
+  closeSpeedPolicy: () => void
   setSortField: (field: string) => void
   setSortOrder: (order: 'asc' | 'desc') => void
   setFontSize: (n: number) => void
@@ -177,7 +183,11 @@ export const useAppStore = create<AppState>()(
       a11yTouched: false,
       glassOpacity: 100,
       wallpaper: '',
+      speedOpen: false,
+      speedPreset: null,
 
+      openSpeedPolicy: (preset) => set({ speedOpen: true, speedPreset: preset ? { sites: preset.sites ?? [], labels: preset.labels ?? [] } : null }),
+      closeSpeedPolicy: () => set({ speedOpen: false, speedPreset: null }),
       setFontSize: (n) => set({ fontSize: n }),
       setGroupShowSize: (v) => set({ groupShowSize: v }),
       setShowStats: (v) => set({ showStats: v }),

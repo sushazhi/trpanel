@@ -4,6 +4,7 @@ import {
   FolderCog,
   FolderInput,
   FolderOpen,
+  Gauge,
   Globe,
   Menu,
   Pause,
@@ -33,7 +34,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ListControls } from '@/components/ListHeader'
-import { BatchMoveDialog, RemoveTorrentDialog } from '@/components/ToolsDialogs'
+import { BatchLimitDialog, BatchMoveDialog, RemoveTorrentDialog } from '@/components/ToolsDialogs'
 
 interface Props {
   onOpenSettings: () => void
@@ -109,6 +110,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   const [avatarOpen, setAvatarOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
+  const [limitOpen, setLimitOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const hasSelection = selectedIds.length > 0
@@ -256,6 +258,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
               <ToolBtn icon={Pause} large={isMobile} title={t('action.stop')} disabled={busy} onClick={() => void actions.stop(selectedIds)} />
               <ToolBtn icon={Trash2} large={isMobile} title={t('action.remove')} danger disabled={busy} onClick={() => setRemoveOpen(true)} />
               <ToolBtn icon={FolderInput} large={isMobile} title={t('action.changePath')} disabled={busy} onClick={() => setMoveOpen(true)} />
+              <ToolBtn icon={Gauge} large={isMobile} title={t('action.batchLimit')} disabled={busy} onClick={() => setLimitOpen(true)} />
               <ToolBtn icon={Tags} large={isMobile} title={t('action.editLabels')} disabled={busy} onClick={onOpenLabels} />
               <ToolBtn icon={ShieldCheck} large={isMobile} title={t('action.verify')} disabled={busy} onClick={() => runLoop((id) => torrentApi.verify(id), 'toast.verifyStarted')} />
               <ToolBtn icon={Repeat} large={isMobile} title={t('action.reannounce')} disabled={busy} onClick={() => runLoop((id) => torrentApi.reannounce(id), 'toast.reannounced')} />
@@ -404,6 +407,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
       {/* 对话框 */}
       <RemoveTorrentDialog open={removeOpen} ids={selectedIds} onClose={() => setRemoveOpen(false)} />
       <BatchMoveDialog open={moveOpen} ids={selectedIds} onClose={() => setMoveOpen(false)} />
+      <BatchLimitDialog open={limitOpen} ids={selectedIds} onClose={() => setLimitOpen(false)} />
     </header>
   )
 }

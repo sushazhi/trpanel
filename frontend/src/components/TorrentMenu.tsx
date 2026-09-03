@@ -794,7 +794,8 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
               </div>
               <div className={row}>
                 <span className={label}>{t('limits.peers')}</span>
-                <NumInput value={peerLimit} min={0} placeholder={t('limits.unlimitedHint')} onChange={(v) => setPeerLimit(v ?? null)} />
+                {/* 连接数 0 = 不连接任何 Peer（并非不限），因此最小值为 1；留空表示不修改 */}
+                <NumInput value={peerLimit} min={1} placeholder={t('limits.unlimitedHint')} onChange={(v) => setPeerLimit(v ?? null)} />
               </div>
               <div className={row}>
                 <span className={label}>{t('limits.seedIdle')}</span>

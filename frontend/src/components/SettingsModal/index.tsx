@@ -1187,7 +1187,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             )}
           </Section>
 
-          {/* 自动化任务入口：自动文件管理 / 做种策略 / MCP 服务（点入子弹窗设置） */}
+          {/* 自动化任务入口：自动文件管理 / 做种策略 / 组内总限速 / MCP 服务（点入子弹窗设置） */}
           <Section id="automation" title={t('session.automation')}>
             <div className="space-y-2">
               <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenMove(true)}>
@@ -1195,6 +1195,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </Button>
               <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenPolicy(true)}>
                 {t('seedPolicy.title')}
+              </Button>
+              <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => useAppStore.getState().openSpeedPolicy()}>
+                {t('speedPolicy.title')}
               </Button>
               <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => setOpenMcp(true)}>
                 {t('session.mcp.title')}

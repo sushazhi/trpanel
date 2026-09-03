@@ -307,3 +307,30 @@ export interface SeedPolicyResult {
   previewed: number
   failed: number
 }
+
+// 分组限速规则：命中站点 / 标签 / 名称的一组种子共享总速度上限，
+// 下载与上传可同时设置，0 = 该方向不限制
+export interface SpeedPolicyRule {
+  id: string
+  name: string
+  enabled: boolean
+  downLimit: number // KB/s，组内下载总上限；0 = 不限
+  upLimit: number // KB/s，组内上传总上限；0 = 不限
+  sites: string[]
+  labels: string[]
+  nameMatch: string
+}
+
+// 组内总限速引擎开关
+export interface SpeedPolicyGuard {
+  enforce: boolean
+}
+
+// 组内总限速单轮执行统计
+export interface SpeedPolicyResult {
+  enabled: boolean
+  matched: number
+  applied: number
+  released: number
+  failed: number
+}

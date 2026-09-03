@@ -12,6 +12,7 @@ import (
 	"github.com/trpanel/backend/internal/platform"
 	"github.com/trpanel/backend/internal/rpc"
 	"github.com/trpanel/backend/internal/seedpolicy"
+	"github.com/trpanel/backend/internal/speedpolicy"
 	"github.com/trpanel/backend/internal/state"
 )
 
@@ -26,33 +27,35 @@ type McpControl struct {
 
 // Handler API 处理器
 type Handler struct {
-	rpc        *rpc.Manager
-	hub        *Hub
-	geo        *GeoService
-	state      *state.Store
-	automove   *automove.Service
-	seedpolicy *seedpolicy.Service
-	plat       platform.Platform
-	dataDir    string
-	apiToken   string
-	mcp        *McpControl
+	rpc         *rpc.Manager
+	hub         *Hub
+	geo         *GeoService
+	state       *state.Store
+	automove    *automove.Service
+	seedpolicy  *seedpolicy.Service
+	speedpolicy *speedpolicy.Service
+	plat        platform.Platform
+	dataDir     string
+	apiToken    string
+	mcp         *McpControl
 }
 
 // NewHandler 创建处理器。
 // plat 提供宿主平台能力：本地文件读取白名单、同源判定策略、宿主专属路由（如 fnOS 应用更新）。
 // mcp 为 MCP 服务的运行期开关，与 main 中 /mcp 路由的 gate 共享同一实例。
-func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, moveSvc *automove.Service, policySvc *seedpolicy.Service, cfg *config.Config, plat platform.Platform, mcp *McpControl) *Handler {
+func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, moveSvc *automove.Service, policySvc *seedpolicy.Service, speedSvc *speedpolicy.Service, cfg *config.Config, plat platform.Platform, mcp *McpControl) *Handler {
 	return &Handler{
-		rpc:        manager,
-		hub:        hub,
-		geo:        geo,
-		state:      st,
-		automove:   moveSvc,
-		seedpolicy: policySvc,
-		plat:       plat,
-		dataDir:    cfg.DataDir,
-		apiToken:   cfg.APIToken,
-		mcp:        mcp,
+		rpc:         manager,
+		hub:         hub,
+		geo:         geo,
+		state:       st,
+		automove:    moveSvc,
+		seedpolicy:  policySvc,
+		speedpolicy: speedSvc,
+		plat:        plat,
+		dataDir:     cfg.DataDir,
+		apiToken:    cfg.APIToken,
+		mcp:         mcp,
 	}
 }
 
@@ -125,6 +128,12 @@ func (h *Handler) Register(r *gin.Engine, prefix string) {
 		api.POST("/seedpolicy/run", h.runSeedPolicy)
 		api.POST("/seedpolicy/reset", h.resetSeedPolicy)
 		api.POST("/seedpolicy/clear-logs", h.clearSeedPolicyLogs)
+		// 组内总限速（按站点/标签/名称分组的带宽上限）
+		api.GET("/speedpolicy", h.listSpeedPolicy)
+		api.POST("/speedpolicy", h.saveSpeedPolicyRule)
+		api.DELETE("/speedpolicy/:id", h.deleteSpeedPolicyRule)
+		api.POST("/speedpolicy/guard", h.saveSpeedPolicyGuard)
+		api.POST("/speedpolicy/run", h.runSpeedPolicy)
 		// Peer 地理位置
 		api.POST("/peers/geo", h.lookupPeers)
 		// 系统命令

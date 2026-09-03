@@ -252,6 +252,144 @@ export function BatchCleanDialog({ open, onClose }: { open: boolean; onClose: ()
   )
 }
 
+// 批量限速：对选中种子统一设置 / 解除下载与上传限速（可选连接数上限）
+export function BatchLimitDialog({ open, ids, onClose }: { open: boolean; ids: number[]; onClose: () => void }) {
+  const { t } = useTranslation()
+  const [dlOn, setDlOn] = useState(false)
+  const [dlValue, setDlValue] = useState<number | undefined>()
+  const [ulOn, setUlOn] = useState(false)
+  const [ulValue, setUlValue] = useState<number | undefined>()
+  const [peerOn, setPeerOn] = useState(false)
+  const [peerValue, setPeerValue] = useState<number | undefined>()
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setDlOn(false)
+      setDlValue(undefined)
+      setUlOn(false)
+      setUlValue(undefined)
+      setPeerOn(false)
+      setPeerValue(undefined)
+      setLoading(false)
+    }
+  }, [open])
+
+  const requireValue = (on: boolean, value: number | undefined) => {
+    if (on && (value == null || value < 1)) return false
+    return true
+  }
+
+  const submit = async () => {
+    if (ids.length === 0) return
+    if (!requireValue(dlOn, dlValue) || !requireValue(ulOn, ulValue) || !requireValue(peerOn, peerValue)) {
+      toast.warning(t('limits.tip'))
+      return
+    }
+    setLoading(true)
+    try {
+      const body: Record<string, unknown> = {}
+      // 勾选 → 设置单种限速；未勾选 → 解除该方向的单种限速（跟随全局限速）
+      body.downloadLimited = dlOn
+      if (dlOn) body.downloadLimit = Math.round(dlValue as number)
+      body.uploadLimited = ulOn
+      if (ulOn) body.uploadLimit = Math.round(ulValue as number)
+      if (peerOn) body.peerLimit = Math.round(peerValue as number)
+      await torrentApi.updateMany(ids, body)
+      toast.success(t('toast.updated'))
+      onClose()
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const row = 'flex items-center justify-between gap-3'
+  const label = 'text-body text-gray-600 dark:text-gray-300'
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{`${t('action.batchLimit')} (${ids.length})`}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className={row}>
+            <span className={label}>{t('limits.download')}</span>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                disabled={!dlOn}
+                className="h-8 w-24 text-footnote"
+                value={dlValue === undefined ? '' : String(dlValue)}
+                placeholder="KB/s"
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (raw === '') { setDlValue(undefined); return }
+                  const n = Number(raw)
+                  if (!Number.isNaN(n)) setDlValue(n)
+                }}
+              />
+              <Switch checked={dlOn} onCheckedChange={setDlOn} />
+            </div>
+          </div>
+          <div className={row}>
+            <span className={label}>{t('limits.upload')}</span>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                disabled={!ulOn}
+                className="h-8 w-24 text-footnote"
+                value={ulValue === undefined ? '' : String(ulValue)}
+                placeholder="KB/s"
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (raw === '') { setUlValue(undefined); return }
+                  const n = Number(raw)
+                  if (!Number.isNaN(n)) setUlValue(n)
+                }}
+              />
+              <Switch checked={ulOn} onCheckedChange={setUlOn} />
+            </div>
+          </div>
+          <div className={row}>
+            <span className={label}>{t('limits.peers')}</span>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                disabled={!peerOn}
+                className="h-8 w-24 text-footnote"
+                value={peerValue === undefined ? '' : String(peerValue)}
+                placeholder={t('limits.unlimitedHint')}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (raw === '') { setPeerValue(undefined); return }
+                  const n = Number(raw)
+                  if (!Number.isNaN(n)) setPeerValue(n)
+                }}
+              />
+              <Switch checked={peerOn} onCheckedChange={setPeerOn} />
+            </div>
+          </div>
+          <div className="text-footnote text-gray-400">{t('batch.limitHint')}</div>
+          <div className="text-footnote text-gray-400">{t('limits.tip')}</div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button disabled={loading || ids.length === 0} onClick={submit}>{loading ? t('common.loading') : t('common.confirm')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // 批量修改下载目录（含"仅移动已完成文件"选项）
 export function BatchMoveDialog({ open, ids, onClose }: { open: boolean; ids: number[]; onClose: () => void }) {
   const { t } = useTranslation()

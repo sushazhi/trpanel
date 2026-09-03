@@ -78,16 +78,115 @@ type SeedPolicyLog struct {
 	DryRun  bool                   `json:"dryRun"`
 }
 
+// 组内总限速方向
+const (
+	SpeedDirectionDown = "down" // 下载
+	SpeedDirectionUp   = "up"   // 上传
+)
+
+// SpeedPolicyRule 分组限速规则：命中站点/标签/名称的一组种子共享总速度上限。
+// 下载与上传可同时设置；填 0 表示该方向不限制（引擎不接管该方向）。
+// 引擎每轮把「上限减去组内手动限速种子实际占用」后的余量均分给
+// 组内运行中且未单独限速的种子，达到整组总和封顶的效果。
+type SpeedPolicyRule struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Enabled   bool     `json:"enabled"`
+	DownLimit int64    `json:"downLimit"` // KB/s，组内下载总上限；0 = 不限
+	UpLimit   int64    `json:"upLimit"`   // KB/s，组内上传总上限；0 = 不限
+	Sites     []string `json:"sites"`     // Tracker 站点（与做种策略同口径）
+	Labels    []string `json:"labels"`    // 标签
+	NameMatch string   `json:"nameMatch"` // 名称包含
+}
+
+// SpeedPolicyGuard 组内总限速引擎开关
+type SpeedPolicyGuard struct {
+	Enforce bool `json:"enforce"` // 关闭时引擎不触碰任何种子
+}
+
+// SpeedApplied 引擎对某个种子的接管记录。
+// Honors 保存接管前该种子「跟随全局限速」的原值：下发单种限速前必须关掉它
+// （honors 为 true 时 Transmission 会忽略本种子的限速字段），释放时再按原值还原，
+// 否则会把原本跟随全局限速的种子改成完全不限速。
+type SpeedApplied struct {
+	Down   int64 `json:"down"`   // KB/s，0 表示该方向未接管
+	Up     int64 `json:"up"`     // KB/s
+	Honors bool  `json:"honors"` // 接管前 honorsSessionLimits 的值
+}
+
 // State 持久化状态
 type State struct {
-	Servers         []Server          `json:"servers"`
-	ActiveServer    int               `json:"activeServer"`
-	AutoMoveRules   []AutoMoveRule    `json:"autoMoveRules"`
-	SeedPolicyRules []SeedPolicyRule  `json:"seedPolicyRules"`
-	SeedPolicyGuard SeedPolicyGuard   `json:"seedPolicyGuard"`
-	SeedPolicyLogs  []SeedPolicyLog   `json:"seedPolicyLogs"`
-	ProcessedMoves  map[string]string `json:"processedMoves"`  // hashString -> time
-	ProcessedPolicy map[string]string `json:"processedPolicy"` // ruleID+"\x00"+hashString -> time
+	Servers          []Server          `json:"servers"`
+	ActiveServer     int               `json:"activeServer"`
+	AutoMoveRules    []AutoMoveRule    `json:"autoMoveRules"`
+	SeedPolicyRules  []SeedPolicyRule  `json:"seedPolicyRules"`
+	SeedPolicyGuard  SeedPolicyGuard   `json:"seedPolicyGuard"`
+	SeedPolicyLogs   []SeedPolicyLog   `json:"seedPolicyLogs"`
+	SpeedPolicyRules []SpeedPolicyRule `json:"speedPolicyRules"`
+	SpeedPolicyGuard SpeedPolicyGuard  `json:"speedPolicyGuard"`
+	// SpeedPolicyApplied 引擎最近一轮下发给各种子（方向 down/up）的限速 KB/s，
+	// 以及接管前是否跟随全局限速。持久化保存：服务重启后仍能区分
+	// 「引擎设定」与「用户手动设定」的限速，只在确认是引擎写入时才释放。
+	SpeedPolicyApplied map[int64]SpeedApplied `json:"speedPolicyApplied"`
+	ProcessedMoves     map[string]string      `json:"processedMoves"`  // hashString -> time
+	ProcessedPolicy    map[string]string      `json:"processedPolicy"` // ruleID+"\x00"+hashString -> time
+}
+
+// Applied 返回该种子的接管记录（未接管过返回 ok=false）
+func (st *State) Applied(id int64) (SpeedApplied, bool) {
+	if st.SpeedPolicyApplied == nil {
+		return SpeedApplied{}, false
+	}
+	a, ok := st.SpeedPolicyApplied[id]
+	return a, ok
+}
+
+// AppliedCap 返回引擎在某方向下发给该种子的限速（0 表示该方向未接管）
+func (st *State) AppliedCap(id int64, dir string) int64 {
+	a, ok := st.Applied(id)
+	if !ok {
+		return 0
+	}
+	if dir == SpeedDirectionUp {
+		return a.Up
+	}
+	return a.Down
+}
+
+// SetAppliedCap 记录某方向的下发值。种子首次被接管时，honors 写入接管前的原值；
+// 已有记录时保留原值不动（后面每轮看到的都是引擎自己关掉的 false）。
+func (st *State) SetAppliedCap(id int64, dir string, cap int64, honors bool) {
+	if st.SpeedPolicyApplied == nil {
+		st.SpeedPolicyApplied = map[int64]SpeedApplied{}
+	}
+	a, ok := st.SpeedPolicyApplied[id]
+	if !ok {
+		a = SpeedApplied{Honors: honors}
+	}
+	if dir == SpeedDirectionUp {
+		a.Up = cap
+	} else {
+		a.Down = cap
+	}
+	st.SpeedPolicyApplied[id] = a
+}
+
+// ClearAppliedDir 清除某方向的接管记录；两个方向都清空时删除整条记录
+func (st *State) ClearAppliedDir(id int64, dir string) {
+	a, ok := st.Applied(id)
+	if !ok {
+		return
+	}
+	if dir == SpeedDirectionUp {
+		a.Up = 0
+	} else {
+		a.Down = 0
+	}
+	if a.Down <= 0 && a.Up <= 0 {
+		delete(st.SpeedPolicyApplied, id)
+		return
+	}
+	st.SpeedPolicyApplied[id] = a
 }
 
 // Store JSON 文件存储（线程安全）
@@ -112,11 +211,12 @@ func Load(path string) (*Store, error) {
 		return nil, err
 	}
 	s.data = &State{
-		Servers:         []Server{},
-		AutoMoveRules:   []AutoMoveRule{},
-		SeedPolicyRules: []SeedPolicyRule{},
-		ProcessedMoves:  map[string]string{},
-		ProcessedPolicy: map[string]string{},
+		Servers:          []Server{},
+		AutoMoveRules:    []AutoMoveRule{},
+		SeedPolicyRules:  []SeedPolicyRule{},
+		SpeedPolicyRules: []SpeedPolicyRule{},
+		ProcessedMoves:   map[string]string{},
+		ProcessedPolicy:  map[string]string{},
 	}
 	_ = s.save()
 	return s, nil
@@ -129,6 +229,12 @@ func (st *State) normalize() {
 	}
 	if st.ProcessedPolicy == nil {
 		st.ProcessedPolicy = map[string]string{}
+	}
+	if st.SpeedPolicyRules == nil {
+		st.SpeedPolicyRules = []SpeedPolicyRule{}
+	}
+	if st.SpeedPolicyApplied == nil {
+		st.SpeedPolicyApplied = map[int64]SpeedApplied{}
 	}
 	// 归档（move）已下线：旧规则改成暂停，避免被引擎静默跳过
 	for i := range st.SeedPolicyRules {

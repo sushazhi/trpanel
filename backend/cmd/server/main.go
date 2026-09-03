@@ -30,6 +30,7 @@ import (
 	_ "github.com/trpanel/backend/internal/platform/fnos"
 	"github.com/trpanel/backend/internal/rpc"
 	"github.com/trpanel/backend/internal/seedpolicy"
+	"github.com/trpanel/backend/internal/speedpolicy"
 	"github.com/trpanel/backend/internal/state"
 )
 
@@ -95,6 +96,7 @@ func main() {
 	hub := api.NewHub(manager, cfg.PollInterval, plat)
 	moveSvc := automove.New(manager, store)
 	policySvc := seedpolicy.New(manager, store)
+	speedSvc := speedpolicy.New(manager, store)
 	// MCP 运行期开关：设置界面修改后即时生效，下次启动的初值来自配置
 	mcpCtl := &api.McpControl{}
 	mcpCtl.Enabled.Store(cfg.MCPEnabled)
@@ -103,11 +105,12 @@ func main() {
 		t := cfg.MCPToken
 		mcpCtl.Token.Store(&t)
 	}
-	handler := api.NewHandler(manager, hub, geo, store, moveSvc, policySvc, cfg, plat, mcpCtl)
+	handler := api.NewHandler(manager, hub, geo, store, moveSvc, policySvc, speedSvc, cfg, plat, mcpCtl)
 	handler.Register(r, gatewayPrefix)
 	hub.Start(ctx)
 	go moveSvc.Run(ctx)
 	go policySvc.Run(ctx)
+	go speedSvc.Run(ctx)
 
 	// MCP：把种子管理能力以工具形式暴露给 AI 客户端（streamable HTTP + 令牌鉴权）。
 	// 路由常驻注册，gate 在鉴权之前拦截关闭状态——按 404 处理，不暴露端点存在性；
