@@ -534,11 +534,18 @@ input[type='range']:disabled::-moz-range-thumb {
     linear-gradient(to top, transparent var(--m-bottom), #000 var(--fade-bottom));
   mask-composite: intersect;
 }
-/* 表格视图：避让量已由外层容器/表头承担，滚动区只需处理底部渐隐 */
+/* 表格视图：避让量已由外层容器/表头承担，滚动区只需处理底部渐隐。
+   列总宽可超视口，横向滚动由本容器承担（表头镜像 scrollLeft）；
+   基础 tm-scroll 保持 hidden，侧栏/卡片视图不允许横向拖动 */
 .tm-scroll--notch {
   --m-top: 0px;
   --fade-top: 0px;
   padding-top: 0;
+  overflow-x: auto;
+  /* 原生横向滚动条画在盒底边 0~10px，正落在底部渐隐的全透明区里被 mask 整条吞掉。
+     在渐变最底端保留 10px 不透明硬切条带让滚动条露出；该区只有 padding 无内容，渐隐视觉不变 */
+  -webkit-mask-image: linear-gradient(to top, #000 10px, transparent 10px, transparent var(--m-bottom), #000 var(--fade-bottom));
+  mask-image: linear-gradient(to top, #000 10px, transparent 10px, transparent var(--m-bottom), #000 var(--fade-bottom));
 }
 /* 侧栏滚动区坐标原点不同（面板已内缩），换算到自身高度 */
 .tm-scroll--side {

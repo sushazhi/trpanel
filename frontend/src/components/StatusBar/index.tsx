@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { HardDrive } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { sessionApi } from '@/api/torrent'
-import { STATUS_META } from '@/utils/status'
+import { STATUS_ITEMS } from '@/components/Sidebar'
+import { matchesStatus } from '@/hooks/useFilter'
 import { useAppStore } from '@/stores/appStore'
 import { usePlatform } from '@/platform'
 import { cn } from '@/lib/utils'
@@ -78,18 +79,23 @@ export const StatusBar: React.FC<Props> = ({ isMobile }) => {
     prevCountRef.current = torrents.length
   }, [torrents.length])
 
-  const counts = (() => {
-    const c: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 }
+  // 与侧栏过滤器同口径（STATUS_ITEMS × matchesStatus）：
+  // 同名分类只允许一套数字，否则右下角和侧栏永远对不上
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: torrents.length }
     for (const tr of torrents) {
-      if (c[tr.status] !== undefined) c[tr.status]++
+      for (const item of STATUS_ITEMS) {
+        if (item.key !== 'all' && matchesStatus(tr, item.key)) {
+          counts[item.key] = (counts[item.key] ?? 0) + 1
+        }
+      }
     }
-    return c
-  })()
+    return counts
+  }, [torrents])
 
-  // 活跃 = 排队下载 + 下载中；暂停 = 已停止；校验 = 等待校验 + 校验中
-  const activeCount = (counts[3] || 0) + (counts[4] || 0)
-  const pausedCount = counts[0] || 0
-  const verifyingCount = (counts[1] || 0) + (counts[2] || 0)
+  const activeCount = statusCounts.active ?? 0
+  const pausedCount = statusCounts.paused ?? 0
+  const verifyingCount = statusCounts.verifying ?? 0
 
   const statusText = wsStatus === 'connected'
     ? t('common.connected')
@@ -205,14 +211,19 @@ export const StatusBar: React.FC<Props> = ({ isMobile }) => {
               )}
               <div className="border-t border-white/60 dark:border-white/10 pt-2 mt-2">
                 <div className="text-gray-500 mb-1">{t('common.status')}</div>
-                {Object.entries(STATUS_META).map(([key, cfg]) => {
-                  const StatusIcon = cfg.icon
-                  const count = counts[Number(key)] || 0
+                {STATUS_ITEMS.map((item) => {
+                  const Icon = item.icon
+                  const count = statusCounts[item.key] ?? 0
                   return (
-                    <div key={key} className="flex items-center justify-between py-0.5">
+                    <div key={item.key} className="flex items-center justify-between py-0.5">
                       <div className="flex items-center gap-1.5">
-                        <StatusIcon className="w-3 h-3" style={{ color: cfg.color }} />
-                        <span className="text-gray-600 dark:text-gray-300">{t(cfg.label)}</span>
+                        <Icon
+                          className={cn(
+                            'w-3 h-3',
+                            item.key === 'error' && count > 0 ? 'text-red-500' : 'text-gray-400',
+                          )}
+                        />
+                        <span className="text-gray-600 dark:text-gray-300">{t(item.label)}</span>
                       </div>
                       <span className="tm-mono text-gray-500">{count}</span>
                     </div>
