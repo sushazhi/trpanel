@@ -190,6 +190,8 @@ func (h *Hub) pollLocked() {
 	}
 	// 差异比较仅基于种子数据（不含 timestamp，否则每次不同导致去重失效）。
 	// 用摘要而不是整份 JSON 做比较：数百种子时避免常驻大块字节并逐轮整段比对。
+	// 只序列化一次：torrentsData 同时用于摘要计算与信封的 data 字段（json.RawMessage 复用字节），
+	// 避免旧实现里同一份数据被 json.Marshal 两次、每轮峰值多出一整份 JSON 的浪费。
 	torrentsData, err := json.Marshal(torrents)
 	if err != nil {
 		slog.Error("序列化种子数据失败", "err", err)
@@ -204,7 +206,7 @@ func (h *Hub) pollLocked() {
 	}
 	data, err := json.Marshal(map[string]interface{}{
 		"type":      "full",
-		"data":      torrents,
+		"data":      json.RawMessage(torrentsData),
 		"timestamp": time.Now().UnixMilli(),
 	})
 	if err != nil {

@@ -81,9 +81,11 @@ func (s *Service) Tick(ctx context.Context) (*Result, error) {
 	if len(plan) == 0 {
 		return result, nil
 	}
-	if !s.store.Get().SeedPolicyGuard.Enforce {
+	// 只取一次状态快照，供保护栏判断与预览落盘复用，避免对同一份状态多次 JSON 深拷贝
+	st := s.store.Get()
+	if !st.SeedPolicyGuard.Enforce {
 		result.Previewed = len(plan)
-		s.persistPreview(plan)
+		s.persistPreview(plan, &st)
 		return result, nil
 	}
 	s.execute(ctx, plan, result)
@@ -320,7 +322,8 @@ func (s *Service) record(items []planItem, dryRun bool) {
 
 // persistPreview 预览只刷新待办清单，不落已处理标记。
 // 未开启自动执行时每分钟都会评估一轮，清单未变则不写盘。
-func (s *Service) persistPreview(plan []planItem) {
+// st 为调用方已取的状态快照，复用其 SeedPolicyLogs 避免再次深拷贝。
+func (s *Service) persistPreview(plan []planItem, st *state.State) {
 	now := state.NowUnix()
 	logs := make([]state.SeedPolicyLog, 0, len(plan))
 	for _, it := range plan {
@@ -334,7 +337,7 @@ func (s *Service) persistPreview(plan []planItem) {
 			DryRun:  true,
 		})
 	}
-	if previewEqual(s.store.Get().SeedPolicyLogs, logs) {
+	if previewEqual(st.SeedPolicyLogs, logs) {
 		return
 	}
 	_ = s.store.Update(func(st *state.State) {
