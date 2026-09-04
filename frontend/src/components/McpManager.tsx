@@ -17,6 +17,7 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
   const { t } = useTranslation()
   const [enabled, setEnabled] = useState(false)
   const [allowDelete, setAllowDelete] = useState(false)
+  const [allowDangerous, setAllowDangerous] = useState(false)
   const [token, setToken] = useState('')
   const [draft, setDraft] = useState('')
   const [mcpPort, setMcpPort] = useState('')
@@ -26,9 +27,10 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
     let cancelled = false
     request(clientGetSettings()).then((d) => {
       if (cancelled) return
-      const data = d as { mcpEnabled?: boolean; mcpAllowDelete?: boolean; mcpToken?: string; mcpPort?: string }
+      const data = d as { mcpEnabled?: boolean; mcpAllowDelete?: boolean; mcpAllowDangerous?: boolean; mcpToken?: string; mcpPort?: string }
       setEnabled(!!data.mcpEnabled)
       setAllowDelete(!!data.mcpAllowDelete)
+      setAllowDangerous(!!data.mcpAllowDangerous)
       setToken(data.mcpToken ?? '')
       setDraft(data.mcpToken ?? '')
       setMcpPort(data.mcpPort ?? '')
@@ -36,7 +38,7 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
     return () => { cancelled = true }
   }, [open])
 
-  const patch = async (body: { mcpEnabled?: boolean; mcpAllowDelete?: boolean; mcpToken?: string }, apply: () => void) => {
+  const patch = async (body: { mcpEnabled?: boolean; mcpAllowDelete?: boolean; mcpAllowDangerous?: boolean; mcpToken?: string }, apply: () => void) => {
     try {
       await request(clientPutSettings(body))
       apply()
@@ -66,6 +68,9 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
           </Row>
           <Row label={t('session.mcp.allowDelete')} hint={t('session.mcp.allowDeleteHint')}>
             <Switch checked={allowDelete} disabled={!enabled} onCheckedChange={(v) => void patch({ mcpAllowDelete: v }, () => setAllowDelete(v))} />
+          </Row>
+          <Row label={t('session.mcp.allowDangerous')} hint={t('session.mcp.allowDangerousHint')}>
+            <Switch checked={allowDangerous} disabled={!enabled} onCheckedChange={(v) => void patch({ mcpAllowDangerous: v }, () => setAllowDangerous(v))} />
           </Row>
           <Row label={t('session.mcp.token')} hint={t('session.mcp.tokenHint')}>
             <Input
@@ -112,5 +117,5 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 }
 
 const clientGetSettings = () => client.get('/settings')
-const clientPutSettings = (body: { mcpEnabled?: boolean; mcpAllowDelete?: boolean; mcpToken?: string }) =>
+const clientPutSettings = (body: { mcpEnabled?: boolean; mcpAllowDelete?: boolean; mcpAllowDangerous?: boolean; mcpToken?: string }) =>
   client.put('/settings', body)

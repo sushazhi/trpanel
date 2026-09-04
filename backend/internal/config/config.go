@@ -12,22 +12,24 @@ import (
 
 // Config 服务配置
 type Config struct {
-	TransmissionURL  string        // Transmission RPC 端点
-	User             string        // RPC 用户名
-	Password         string        // RPC 密码
-	Host             string        // 本服务监听地址（默认仅回环，避免局域网裸奔）
-	Port             string        // 本服务监听端口
-	APIToken         string        // 接口访问令牌；为空表示不启用鉴权
-	Platform         string        // 宿主平台：generic（默认）| fnos，留空时自动推断
-	GatewayPrefix    string        // 宿主网关挂载的 URL 前缀（如 /app/transmission）
-	TorrentPathRoots []string      // 允许按路径读取 .torrent 的根目录（NAS 文件选择器）
-	PollInterval     time.Duration // WebSocket 轮询间隔
-	LogLevel         string        // 日志级别 debug/info/warn/error
-	DataDir          string        // 数据目录（状态文件存放位置）
-	MCPEnabled       bool          // 启用 MCP 服务（/mcp 端点，供 AI 客户端接入）
-	MCPAllowDelete   bool          // 允许通过 MCP 删除种子（高危操作，默认关闭）
-	MCPToken         string        // MCP 接入令牌；空表示不启用（仅建议回环 / 内网使用）
-	MCPPort          string        // MCP 专用直连端口；空表示不开启（socket 部署下供 AI 客户端绕过网关直连）
+	TransmissionURL   string        // Transmission RPC 端点
+	User              string        // RPC 用户名
+	Password          string        // RPC 密码
+	Host              string        // 本服务监听地址（默认仅回环，避免局域网裸奔）
+	Port              string        // 本服务监听端口
+	APIToken          string        // 接口访问令牌；为空表示不启用鉴权
+	Platform          string        // 宿主平台：generic（默认）| fnos，留空时自动推断
+	GatewayPrefix     string        // 宿主网关挂载的 URL 前缀（如 /app/transmission）
+	TorrentPathRoots  []string      // 允许按路径读取 .torrent 的根目录（NAS 文件选择器）
+	PathMappings      []string      // 远端→本地路径映射（"远端路径=本地路径"），用于打开目录/复制路径的展示转换
+	PollInterval      time.Duration // WebSocket 轮询间隔
+	LogLevel          string        // 日志级别 debug/info/warn/error
+	DataDir           string        // 数据目录（状态文件存放位置）
+	MCPEnabled        bool          // 启用 MCP 服务（/mcp 端点，供 AI 客户端接入）
+	MCPAllowDelete    bool          // 允许通过 MCP 删除种子（高危操作，默认关闭）
+	MCPAllowDangerous bool          // 允许通过 MCP 执行其它高危操作（移动/重命名/执行做种策略，默认关闭）
+	MCPToken          string        // MCP 接入令牌；空表示不启用（仅建议回环 / 内网使用）
+	MCPPort           string        // MCP 专用直连端口；空表示不开启（socket 部署下供 AI 客户端绕过网关直连）
 }
 
 // Load 加载配置，优先级：环境变量 > .env.local > .env > config.yaml > 默认值
@@ -50,11 +52,13 @@ func Load() (*Config, error) {
 	v.SetDefault("gateway_prefix", "")
 	// NAS 文件选择器返回的路径仅允许落在这些根目录下（逗号分隔，可用 TORRENT_PATH_ROOTS 覆盖）
 	v.SetDefault("torrent_path_roots", []string{"/vol", "/mnt", "/media", "/volume1"})
+	v.SetDefault("path_mappings", []string{})
 	v.SetDefault("poll_interval", "2s")
 	v.SetDefault("log_level", "info")
 	v.SetDefault("data_dir", defaultDataDir())
 	v.SetDefault("mcp_enabled", false)
 	v.SetDefault("mcp_allow_delete", false)
+	v.SetDefault("mcp_allow_dangerous", false)
 	v.SetDefault("mcp_token", "")
 	v.SetDefault("mcp_port", "")
 
@@ -90,21 +94,22 @@ func Load() (*Config, error) {
 
 	// 环境变量覆盖（最高优先级）
 	envKeys := map[string]string{
-		"tr_url":           "TR_URL",
-		"tr_user":          "TR_USER",
-		"tr_pass":          "TR_PASS",
-		"server_host":      "SERVER_HOST",
-		"server_port":      "SERVER_PORT",
-		"api_token":        "API_TOKEN",
-		"platform":         "TM_PLATFORM",
-		"gateway_prefix":   "GATEWAY_PREFIX",
-		"poll_interval":    "POLL_INTERVAL",
-		"log_level":        "LOG_LEVEL",
-		"data_dir":         "TM_DATA_DIR",
-		"mcp_enabled":      "MCP_ENABLED",
-		"mcp_allow_delete": "MCP_ALLOW_DELETE",
-		"mcp_token":        "MCP_TOKEN",
-		"mcp_port":         "MCP_PORT",
+		"tr_url":              "TR_URL",
+		"tr_user":             "TR_USER",
+		"tr_pass":             "TR_PASS",
+		"server_host":         "SERVER_HOST",
+		"server_port":         "SERVER_PORT",
+		"api_token":           "API_TOKEN",
+		"platform":            "TM_PLATFORM",
+		"gateway_prefix":      "GATEWAY_PREFIX",
+		"poll_interval":       "POLL_INTERVAL",
+		"log_level":           "LOG_LEVEL",
+		"data_dir":            "TM_DATA_DIR",
+		"mcp_enabled":         "MCP_ENABLED",
+		"mcp_allow_delete":    "MCP_ALLOW_DELETE",
+		"mcp_allow_dangerous": "MCP_ALLOW_DANGEROUS",
+		"mcp_token":           "MCP_TOKEN",
+		"mcp_port":            "MCP_PORT",
 	}
 	for key, env := range envKeys {
 		if val, ok := os.LookupEnv(env); ok {
@@ -122,23 +127,31 @@ func Load() (*Config, error) {
 		roots = expandList(strings.Split(raw, ","))
 	}
 
+	// 路径映射：config.yaml 列表或 PATH_MAPPINGS 环境变量（逗号分隔，每项 远端=本地）
+	pathMappings := expandList(v.GetStringSlice("path_mappings"))
+	if raw, ok := os.LookupEnv("PATH_MAPPINGS"); ok {
+		pathMappings = expandList(strings.Split(raw, ","))
+	}
+
 	return &Config{
-		TransmissionURL:  v.GetString("tr_url"),
-		User:             v.GetString("tr_user"),
-		Password:         v.GetString("tr_pass"),
-		Host:             v.GetString("server_host"),
-		Port:             fmt.Sprintf("%d", v.GetInt("server_port")),
-		APIToken:         v.GetString("api_token"),
-		Platform:         strings.TrimSpace(v.GetString("platform")),
-		GatewayPrefix:    strings.TrimSpace(v.GetString("gateway_prefix")),
-		TorrentPathRoots: roots,
-		PollInterval:     dur,
-		LogLevel:         v.GetString("log_level"),
-		DataDir:          dataDir,
-		MCPEnabled:       v.GetBool("mcp_enabled"),
-		MCPAllowDelete:   v.GetBool("mcp_allow_delete"),
-		MCPToken:         strings.TrimSpace(v.GetString("mcp_token")),
-		MCPPort:          strings.TrimSpace(v.GetString("mcp_port")),
+		TransmissionURL:   v.GetString("tr_url"),
+		User:              v.GetString("tr_user"),
+		Password:          v.GetString("tr_pass"),
+		Host:              v.GetString("server_host"),
+		Port:              fmt.Sprintf("%d", v.GetInt("server_port")),
+		APIToken:          v.GetString("api_token"),
+		Platform:          strings.TrimSpace(v.GetString("platform")),
+		GatewayPrefix:     strings.TrimSpace(v.GetString("gateway_prefix")),
+		TorrentPathRoots:  roots,
+		PathMappings:      pathMappings,
+		PollInterval:      dur,
+		LogLevel:          v.GetString("log_level"),
+		DataDir:           dataDir,
+		MCPEnabled:        v.GetBool("mcp_enabled"),
+		MCPAllowDelete:    v.GetBool("mcp_allow_delete"),
+		MCPAllowDangerous: v.GetBool("mcp_allow_dangerous"),
+		MCPToken:          strings.TrimSpace(v.GetString("mcp_token")),
+		MCPPort:           strings.TrimSpace(v.GetString("mcp_port")),
 	}, nil
 }
 

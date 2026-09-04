@@ -23,19 +23,22 @@ type Server struct {
 	// allowDelete 控制删除类工具是否可用（高危操作，默认关闭）；
 	// 指向共享的原子开关，设置界面修改后无需重启即生效
 	allowDelete *atomic.Bool
+	// allowDangerous 控制移动 / 重命名 / 立即执行做种策略等其它高危工具（默认关闭）
+	allowDangerous *atomic.Bool
 	// onMutation 写操作成功后回调（触发 WebSocket 立即刷新），可为 nil
 	onMutation func()
 }
 
 // New 创建 MCP 服务
-func New(manager *rpc.Manager, policy *seedpolicy.Service, store *state.Store, plat platform.Platform, allowDelete *atomic.Bool, onMutation func()) *Server {
+func New(manager *rpc.Manager, policy *seedpolicy.Service, store *state.Store, plat platform.Platform, allowDelete, allowDangerous *atomic.Bool, onMutation func()) *Server {
 	return &Server{
-		manager:     manager,
-		policy:      policy,
-		store:       store,
-		plat:        plat,
-		allowDelete: allowDelete,
-		onMutation:  onMutation,
+		manager:        manager,
+		policy:         policy,
+		store:          store,
+		plat:           plat,
+		allowDelete:    allowDelete,
+		allowDangerous: allowDangerous,
+		onMutation:     onMutation,
 	}
 }
 

@@ -12,6 +12,7 @@ import { useAppStore } from '@/stores/appStore'
 import type { ColumnConfig, Torrent } from '@/types'
 import { formatBytes, formatDate, formatDuration, formatEta, formatRatio, formatSpeed } from '@/utils/format'
 import { translateError } from '@/utils/errorText'
+import { mapPath } from '@/utils/pathMapping'
 import { toast } from '@/lib/toast'
 import { cn, cssVars } from '@/lib/utils'
 import { tagColor } from '@/utils/tagColor'
@@ -431,7 +432,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
     } else if (key === 'copyName') {
       void navigator.clipboard?.writeText(torrent.name).catch(() => {}).finally(() => toast.success(t('toast.copied')))
     } else if (key === 'copyPath') {
-      void navigator.clipboard?.writeText(torrent.downloadDir).catch(() => {}).finally(() => toast.success(t('toast.copied')))
+      void mapPath(torrent.downloadDir).then((p) => navigator.clipboard?.writeText(p)).catch(() => {}).finally(() => toast.success(t('toast.copied')))
     } else if (key === 'remove') {
       setRemoveIds([id])
     } else if (key === 'openDir') {

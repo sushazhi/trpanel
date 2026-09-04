@@ -99,36 +99,36 @@ func (h *Handler) freeSpace(c *gin.Context) {
 // setSession 更新会话配置
 func (h *Handler) setSession(c *gin.Context) {
 	var body struct {
-		DownloadDir          *string  `json:"downloadDir"`
-		SpeedLimitDown       *int64   `json:"speedLimitDown"`
-		SpeedLimitDownOn     *bool    `json:"speedLimitDownOn"`
-		SpeedLimitUp         *int64   `json:"speedLimitUp"`
-		SpeedLimitUpOn       *bool    `json:"speedLimitUpOn"`
-		AltSpeedDown         *int64   `json:"altSpeedDown"`
-		AltSpeedUp           *int64   `json:"altSpeedUp"`
-		AltSpeedEnabled      *bool    `json:"altSpeedEnabled"`
-		StartAdded           *bool    `json:"startAdded"`
-		PeerLimitGlobal      *int64   `json:"peerLimitGlobal"`
-		PEXEnabled           *bool    `json:"pexEnabled"`
-		DHTEnabled           *bool    `json:"dhtEnabled"`
-		SeedRatioLimit       *float64 `json:"seedRatioLimit"`
-		Encryption           *string  `json:"encryption"`
-		DownloadQueueEnabled *bool    `json:"downloadQueueEnabled"`
-		DownloadQueueSize    *int64   `json:"downloadQueueSize"`
-		SeedQueueEnabled     *bool    `json:"seedQueueEnabled"`
-		SeedQueueSize        *int64   `json:"seedQueueSize"`
-		QueueStalledEnabled  *bool    `json:"queueStalledEnabled"`
-		QueueStalledMinutes  *int64   `json:"queueStalledMinutes"`
-		BlocklistEnabled      *bool    `json:"blocklistEnabled"`
-		BlocklistURL          *string  `json:"blocklistUrl"`
-		PortForwardingEnabled *bool    `json:"portForwardingEnabled"`
-		IncompleteDir         *string  `json:"incompleteDir"`
-		IncompleteDirEnabled  *bool    `json:"incompleteDirEnabled"`
-		CacheSizeMB           *int64   `json:"cacheSizeMB"`
-		AltSpeedTimeEnabled   *bool    `json:"altSpeedTimeEnabled"`
-		AltSpeedTimeBegin     *int64   `json:"altSpeedTimeBegin"`
-		AltSpeedTimeEnd       *int64   `json:"altSpeedTimeEnd"`
-		AltSpeedTimeDay       *int64   `json:"altSpeedTimeDay"`
+		DownloadDir                      *string  `json:"downloadDir"`
+		SpeedLimitDown                   *int64   `json:"speedLimitDown"`
+		SpeedLimitDownOn                 *bool    `json:"speedLimitDownOn"`
+		SpeedLimitUp                     *int64   `json:"speedLimitUp"`
+		SpeedLimitUpOn                   *bool    `json:"speedLimitUpOn"`
+		AltSpeedDown                     *int64   `json:"altSpeedDown"`
+		AltSpeedUp                       *int64   `json:"altSpeedUp"`
+		AltSpeedEnabled                  *bool    `json:"altSpeedEnabled"`
+		StartAdded                       *bool    `json:"startAdded"`
+		PeerLimitGlobal                  *int64   `json:"peerLimitGlobal"`
+		PEXEnabled                       *bool    `json:"pexEnabled"`
+		DHTEnabled                       *bool    `json:"dhtEnabled"`
+		SeedRatioLimit                   *float64 `json:"seedRatioLimit"`
+		Encryption                       *string  `json:"encryption"`
+		DownloadQueueEnabled             *bool    `json:"downloadQueueEnabled"`
+		DownloadQueueSize                *int64   `json:"downloadQueueSize"`
+		SeedQueueEnabled                 *bool    `json:"seedQueueEnabled"`
+		SeedQueueSize                    *int64   `json:"seedQueueSize"`
+		QueueStalledEnabled              *bool    `json:"queueStalledEnabled"`
+		QueueStalledMinutes              *int64   `json:"queueStalledMinutes"`
+		BlocklistEnabled                 *bool    `json:"blocklistEnabled"`
+		BlocklistURL                     *string  `json:"blocklistUrl"`
+		PortForwardingEnabled            *bool    `json:"portForwardingEnabled"`
+		IncompleteDir                    *string  `json:"incompleteDir"`
+		IncompleteDirEnabled             *bool    `json:"incompleteDirEnabled"`
+		CacheSizeMB                      *int64   `json:"cacheSizeMB"`
+		AltSpeedTimeEnabled              *bool    `json:"altSpeedTimeEnabled"`
+		AltSpeedTimeBegin                *int64   `json:"altSpeedTimeBegin"`
+		AltSpeedTimeEnd                  *int64   `json:"altSpeedTimeEnd"`
+		AltSpeedTimeDay                  *int64   `json:"altSpeedTimeDay"`
 		ScriptTorrentAddedEnabled        *bool    `json:"scriptTorrentAddedEnabled"`
 		ScriptTorrentAddedFilename       *string  `json:"scriptTorrentAddedFilename"`
 		ScriptTorrentDoneEnabled         *bool    `json:"scriptTorrentDoneEnabled"`
@@ -148,36 +148,49 @@ func (h *Handler) setSession(c *gin.Context) {
 		return
 	}
 
+	// Transmission 会在种子事件时以 Transmission 服务账号权限执行脚本钩子：
+	// 任意设置 script-torrent-done-filename 等字段，配合添加种子把恶意可执行文件
+	// 下载到磁盘再指定为钩子，可形成「下载即执行」的 RCE 链。与 systemCommand
+	// 一致，要求部署具备认证边界（令牌鉴权或宿主网关统一认证）才允许修改脚本字段。
+	if h.apiToken == "" && !h.plat.SecurityPolicy().AllowEmbedding {
+		if body.ScriptTorrentAddedEnabled != nil || body.ScriptTorrentAddedFilename != nil ||
+			body.ScriptTorrentDoneEnabled != nil || body.ScriptTorrentDoneFilename != nil ||
+			body.ScriptTorrentDoneSeedingEnabled != nil || body.ScriptTorrentDoneSeedingFilename != nil {
+			respondError(c, http.StatusForbidden, "脚本钩子设置需认证：请设置 API_TOKEN 启用令牌鉴权，或经宿主网关部署")
+			return
+		}
+	}
+
 	payload := trpc.SessionArguments{
-		DownloadDir:           body.DownloadDir,
-		SpeedLimitDown:        body.SpeedLimitDown,
-		SpeedLimitDownEnabled: body.SpeedLimitDownOn,
-		SpeedLimitUp:          body.SpeedLimitUp,
-		SpeedLimitUpEnabled:   body.SpeedLimitUpOn,
-		AltSpeedDown:          body.AltSpeedDown,
-		AltSpeedUp:            body.AltSpeedUp,
-		AltSpeedEnabled:       body.AltSpeedEnabled,
-		StartAddedTorrents:    body.StartAdded,
-		PeerLimitGlobal:       body.PeerLimitGlobal,
-		PEXEnabled:            body.PEXEnabled,
-		DHTEnabled:            body.DHTEnabled,
-		SeedRatioLimit:        body.SeedRatioLimit,
-		DownloadQueueEnabled:  body.DownloadQueueEnabled,
-		DownloadQueueSize:     body.DownloadQueueSize,
-		SeedQueueEnabled:      body.SeedQueueEnabled,
-		SeedQueueSize:         body.SeedQueueSize,
-		QueueStalledEnabled:   body.QueueStalledEnabled,
-		QueueStalledMinutes:   body.QueueStalledMinutes,
-		BlocklistEnabled:      body.BlocklistEnabled,
-		BlocklistURL:          body.BlocklistURL,
-		PortForwardingEnabled: body.PortForwardingEnabled,
-		IncompleteDir:         body.IncompleteDir,
-		IncompleteDirEnabled:  body.IncompleteDirEnabled,
-		CacheSizeMB:           body.CacheSizeMB,
-		AltSpeedTimeEnabled:   body.AltSpeedTimeEnabled,
-		AltSpeedTimeBegin:     body.AltSpeedTimeBegin,
-		AltSpeedTimeEnd:       body.AltSpeedTimeEnd,
-		AltSpeedTimeDay:       body.AltSpeedTimeDay,
+		DownloadDir:                      body.DownloadDir,
+		SpeedLimitDown:                   body.SpeedLimitDown,
+		SpeedLimitDownEnabled:            body.SpeedLimitDownOn,
+		SpeedLimitUp:                     body.SpeedLimitUp,
+		SpeedLimitUpEnabled:              body.SpeedLimitUpOn,
+		AltSpeedDown:                     body.AltSpeedDown,
+		AltSpeedUp:                       body.AltSpeedUp,
+		AltSpeedEnabled:                  body.AltSpeedEnabled,
+		StartAddedTorrents:               body.StartAdded,
+		PeerLimitGlobal:                  body.PeerLimitGlobal,
+		PEXEnabled:                       body.PEXEnabled,
+		DHTEnabled:                       body.DHTEnabled,
+		SeedRatioLimit:                   body.SeedRatioLimit,
+		DownloadQueueEnabled:             body.DownloadQueueEnabled,
+		DownloadQueueSize:                body.DownloadQueueSize,
+		SeedQueueEnabled:                 body.SeedQueueEnabled,
+		SeedQueueSize:                    body.SeedQueueSize,
+		QueueStalledEnabled:              body.QueueStalledEnabled,
+		QueueStalledMinutes:              body.QueueStalledMinutes,
+		BlocklistEnabled:                 body.BlocklistEnabled,
+		BlocklistURL:                     body.BlocklistURL,
+		PortForwardingEnabled:            body.PortForwardingEnabled,
+		IncompleteDir:                    body.IncompleteDir,
+		IncompleteDirEnabled:             body.IncompleteDirEnabled,
+		CacheSizeMB:                      body.CacheSizeMB,
+		AltSpeedTimeEnabled:              body.AltSpeedTimeEnabled,
+		AltSpeedTimeBegin:                body.AltSpeedTimeBegin,
+		AltSpeedTimeEnd:                  body.AltSpeedTimeEnd,
+		AltSpeedTimeDay:                  body.AltSpeedTimeDay,
 		ScriptTorrentAddedEnabled:        body.ScriptTorrentAddedEnabled,
 		ScriptTorrentAddedFilename:       body.ScriptTorrentAddedFilename,
 		ScriptTorrentDoneEnabled:         body.ScriptTorrentDoneEnabled,

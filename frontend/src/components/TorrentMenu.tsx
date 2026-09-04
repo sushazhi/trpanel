@@ -26,7 +26,7 @@ import {
   Replace,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { torrentApi } from '@/api/torrent'
+import { sessionApi, torrentApi } from '@/api/torrent'
 import { useTorrentActions } from '@/hooks/useTorrentActions'
 import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
@@ -240,7 +240,9 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
     <div
       ref={ref}
       onPointerDown={(e) => e.stopPropagation()}
-      className="tm-ctx fixed z-[100] glass-panel-strong min-w-44 max-h-[80dvh] overflow-y-auto overscroll-contain rounded-xl p-1"
+      // pointer-events-auto：Radix 弹层（Sheet/Dialog）打开期间会给 body 设 pointer-events:none
+      // 防滚动穿透，portal 到 body 的本菜单会继承到；不显式恢复的话整个菜单点不到、误触底下层
+      className="tm-ctx pointer-events-auto fixed z-[100] glass-panel-strong min-w-44 max-h-[80dvh] overflow-y-auto overscroll-contain rounded-xl p-1"
       style={style}
     >
       {items.map((item, idx) => {
@@ -582,6 +584,9 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
   const [peerLimit, setPeerLimit] = useState<number | null>(null)
   const [seedIdleEnabled, setSeedIdleEnabled] = useState(false)
   const [seedIdleLimit, setSeedIdleLimit] = useState<number | null>(null)
+  // 带宽组（Transmission 4.x）：该种子归属的组 + 全库可用组列表
+  const [torrentGroups, setTorrentGroups] = useState<string[]>([])
+  const [allGroups, setAllGroups] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(false)
 
@@ -619,8 +624,15 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
       setPeerLimit(torrent.peerLimit || null)
       setSeedIdleEnabled((torrent.seedIdleLimit ?? 0) > 0)
       setSeedIdleLimit(torrent.seedIdleLimit || null)
-      // 列表不含 sequentialDownload，拉取详情补全
-      torrentApi.detail(torrent.id).then((d) => { if (!cancelled) setSequential(d.sequentialDownload || false) }).catch(() => {})
+      setTorrentGroups(torrent.groups ?? [])
+      // 列表不含 sequentialDownload / groups 的完整口径，拉取详情补全
+      torrentApi.detail(torrent.id).then((d) => {
+        if (cancelled) return
+        setSequential(d.sequentialDownload || false)
+        if (d.groups) setTorrentGroups(d.groups)
+      }).catch(() => {})
+      // 带宽组列表（Transmission 4.x；旧版本返回失败时静默隐藏该区块）
+      sessionApi.groups().then((gs) => { if (!cancelled) setAllGroups(gs.map((g) => g.name)) }).catch(() => {})
     }
     return () => { cancelled = true }
   }, [target, t])
@@ -658,6 +670,9 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
         if (peerLimit != null && peerLimit >= 0) body.peerLimit = peerLimit
         body.seedIdleMode = seedIdleEnabled ? 1 : 0
         if (seedIdleEnabled && seedIdleLimit != null) body.seedIdleLimit = seedIdleLimit
+        // 仅在带宽组列表可用（Transmission 4.x）时才提交组归属：
+        // 旧版本或拉取失败时发送空数组会意外清空已有归属
+        if (allGroups.length > 0) body.groups = torrentGroups
         await torrentApi.update(torrent.id, body)
       }
       toast.success(t('toast.updated'))
@@ -762,6 +777,33 @@ export function EditModals({ target, onClose }: { target: EditTarget | null; onC
                 <span className={label}>{t('limits.sequential')}</span>
                 <Switch checked={sequential} onCheckedChange={setSequential} />
               </div>
+              {allGroups.length > 0 && (
+                <div className={row}>
+                  <span className={label}>{t('limits.bandwidthGroup')}</span>
+                  <div className="flex flex-wrap justify-end gap-1.5 max-w-[60%]">
+                    {allGroups.map((g) => {
+                      const active = torrentGroups.includes(g)
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() =>
+                            setTorrentGroups((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
+                          }
+                          className={cn(
+                            'px-2 py-0.5 text-footnote rounded-full border transition-colors',
+                            active
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'text-gray-500 dark:text-gray-400 border-input hover:border-gray-400',
+                          )}
+                        >
+                          {g}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               <div className={row}>
                 <span className={label}>{t('limits.seedRatio')}</span>
                 <div className="flex items-center gap-2">

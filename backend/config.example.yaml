@@ -24,5 +24,7 @@ torrent_path_roots: "/vol,/mnt,/media,/volume1"
 mcp_enabled: false
 # 危险操作开关：允许 AI 通过 MCP 删除种子（deleteData=true 时连同本地文件），默认关闭
 mcp_allow_delete: false
+# 其它高危操作开关：允许 AI 通过 MCP 移动 / 重命名种子文件、立即执行做种策略（含删数据），默认关闭
+mcp_allow_dangerous: false
 # MCP 接入令牌（独立于 api_token，仅作用于 /mcp）：客户端以 Authorization: Bearer <令牌> 鉴权；留空 = 不启用
 mcp_token: ""

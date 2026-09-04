@@ -20,13 +20,14 @@ func (h *Handler) getSettings(c *gin.Context) {
 		mcpToken = *t
 	}
 	respond(c, gin.H{
-		"url":            url,
-		"user":           user,
-		"pollInterval":   h.hub.getPollInterval().String(),
-		"mcpEnabled":     h.mcp.Enabled.Load(),
-		"mcpAllowDelete": h.mcp.AllowDelete.Load(),
-		"mcpToken":       mcpToken,
-		"mcpPort":        h.mcpPort,
+		"url":               url,
+		"user":              user,
+		"pollInterval":      h.hub.getPollInterval().String(),
+		"mcpEnabled":        h.mcp.Enabled.Load(),
+		"mcpAllowDelete":    h.mcp.AllowDelete.Load(),
+		"mcpAllowDangerous": h.mcp.AllowDangerous.Load(),
+		"mcpToken":          mcpToken,
+		"mcpPort":           h.mcpPort,
 	})
 }
 
@@ -34,19 +35,20 @@ func (h *Handler) getSettings(c *gin.Context) {
 // 持久化统一合并当前生效值整文件写入 .env.local，两类设置互不覆盖
 func (h *Handler) updateSettings(c *gin.Context) {
 	var body struct {
-		URL            string  `json:"url"`
-		User           string  `json:"user"`
-		Pass           string  `json:"pass"`
-		PollInterval   string  `json:"pollInterval"`
-		MCPEnabled     *bool   `json:"mcpEnabled"`
-		MCPAllowDelete *bool   `json:"mcpAllowDelete"`
-		MCPToken       *string `json:"mcpToken"`
+		URL               string  `json:"url"`
+		User              string  `json:"user"`
+		Pass              string  `json:"pass"`
+		PollInterval      string  `json:"pollInterval"`
+		MCPEnabled        *bool   `json:"mcpEnabled"`
+		MCPAllowDelete    *bool   `json:"mcpAllowDelete"`
+		MCPAllowDangerous *bool   `json:"mcpAllowDangerous"`
+		MCPToken          *string `json:"mcpToken"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
 		return
 	}
-	if body.URL == "" && body.MCPEnabled == nil && body.MCPAllowDelete == nil && body.MCPToken == nil {
+	if body.URL == "" && body.MCPEnabled == nil && body.MCPAllowDelete == nil && body.MCPAllowDangerous == nil && body.MCPToken == nil {
 		respondError(c, http.StatusBadRequest, "没有要保存的设置")
 		return
 	}
@@ -118,6 +120,9 @@ func (h *Handler) updateSettings(c *gin.Context) {
 	if body.MCPAllowDelete != nil {
 		h.mcp.AllowDelete.Store(*body.MCPAllowDelete)
 	}
+	if body.MCPAllowDangerous != nil {
+		h.mcp.AllowDangerous.Store(*body.MCPAllowDangerous)
+	}
 	if body.MCPToken != nil {
 		if *body.MCPToken == "" {
 			h.mcp.Token.Store(nil)
@@ -141,13 +146,14 @@ func (h *Handler) updateSettings(c *gin.Context) {
 		mcpToken = *t
 	}
 	if err := config.SaveLocalSettings(h.dataDir, config.LocalSettings{
-		TransmissionURL: url,
-		User:            user,
-		Pass:            pass,
-		PollInterval:    pollStr,
-		MCPEnabled:      h.mcp.Enabled.Load(),
-		MCPAllowDelete:  h.mcp.AllowDelete.Load(),
-		MCPToken:        mcpToken,
+		TransmissionURL:   url,
+		User:              user,
+		Pass:              pass,
+		PollInterval:      pollStr,
+		MCPEnabled:        h.mcp.Enabled.Load(),
+		MCPAllowDelete:    h.mcp.AllowDelete.Load(),
+		MCPAllowDangerous: h.mcp.AllowDangerous.Load(),
+		MCPToken:          mcpToken,
 	}); err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return

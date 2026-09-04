@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { FilePlus, FolderPlus, Trash2 } from 'lucide-react'
+import { FilePlus, FolderPlus, Server, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   collectDirHandle,
@@ -11,6 +11,7 @@ import { downloadBytes } from '@/utils/bencode'
 import { formatBytes } from '@/utils/format'
 import { torrentApi } from '@/api/torrent'
 import { toast } from '@/lib/toast'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -30,9 +31,12 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 
-// 浏览器端创建 .torrent 对话框
+// 创建 .torrent 对话框。
+// 两种模式：本地文件（浏览器端单线程哈希）/ 服务器路径（后端多线程哈希，大文件首选）。
 export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation()
+  const [mode, setMode] = useState<'local' | 'server'>('local')
+  const [serverPath, setServerPath] = useState('')
   const [sources, setSources] = useState<TorrentSourceFile[]>([])
   const [announce, setAnnounce] = useState('')
   const [webSeeds, setWebSeeds] = useState('')
@@ -61,6 +65,7 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
     '16m': 16 * 1024 * 1024,
   }
   const pieceLength = useMemo(() => pieceMap[pieceMode] ?? suggestPieceLength(totalSize), [pieceMode, totalSize])
+  const pieceLengthBytes = pieceMap[pieceMode] ?? 0 // server 模式下 auto 时传 0 由后端按体积推荐
 
   const pickDir = async () => {
     const picker = (window as unknown as { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> })
@@ -78,7 +83,56 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
     }
   }
 
+  // 服务器路径模式：提交后端任务并轮询进度，多线程哈希对大目录快得多
+  const buildServer = async () => {
+    if (!serverPath.trim()) return
+    setBuilding(true)
+    setProgress(0)
+    try {
+      const { jobId } = await torrentApi.createStart({
+        path: serverPath.trim(),
+        announce: announce || undefined,
+        private: privateTorrent,
+        pieceLength: pieceLengthBytes || undefined,
+        comment: comment || undefined,
+        webSeeds: webSeeds.split('\n').map((x) => x.trim()).filter(Boolean),
+        autoAdd: addAfterBuild,
+      })
+      // 轮询任务进度（后端处理一次全盘遍历，耗时取决于体积）
+      const poll = () =>
+        torrentApi.createStatus(jobId).then((st) => {
+          if (st.status === 'error') throw new Error(st.error || t('createTorrent.buildFailed'))
+          setProgress(st.total ? Math.min(100, Math.round((st.processed / st.total) * 100)) : 0)
+          return st
+        })
+      let st = await poll()
+      while (st.status === 'running') {
+        await new Promise((r) => setTimeout(r, 500))
+        st = await poll()
+      }
+      const name = (st.name || serverPath.trim().split('/').filter(Boolean).pop() || 'torrent').replace(/[\\/:*?"<>|]/g, '_')
+      if (addAfterBuild) {
+        toast.success(st.autoAdded ? t('toast.added') : t('createTorrent.buildDoneAddFailed'))
+      } else {
+        const data = await torrentApi.createFile(jobId)
+        downloadBytes(data, `${name}.torrent`)
+        toast.success(t('toast.copied'))
+      }
+      setServerPath('')
+      setAnnounce('')
+      setComment('')
+      setPrivateTorrent(false)
+      setAddAfterBuild(false)
+      onClose()
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : t('createTorrent.buildFailed'))
+    } finally {
+      setBuilding(false)
+    }
+  }
+
   const build = async () => {
+    if (mode === 'server') return buildServer()
     if (sources.length === 0) return
     setBuilding(true)
     setProgress(0)
@@ -112,13 +166,13 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
       setAddAfterBuild(false)
       onClose()
     } catch {
-      toast.error(t('common.loading'))
+      toast.error(t('createTorrent.buildFailed'))
     } finally {
       setBuilding(false)
     }
   }
 
-  const canBuild = sources.length > 0 && !building
+  const canBuild = !building && (mode === 'server' ? serverPath.trim() !== '' : sources.length > 0)
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -128,8 +182,48 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* 文件选择 */}
-          <div className="flex gap-2">
+          {/* 模式切换：本地文件（浏览器哈希）/ 服务器路径（后端多线程哈希） */}
+          <div className="inline-flex rounded-md border border-input bg-muted/50 p-0.5 w-full">
+            <button
+              type="button"
+              onClick={() => setMode('local')}
+              className={cn(
+                'flex-1 px-2.5 py-1 text-footnote rounded transition-colors',
+                mode === 'local'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
+              )}
+            >
+              {t('createTorrent.modeLocal')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('server')}
+              className={cn(
+                'flex-1 px-2.5 py-1 text-footnote rounded transition-colors inline-flex items-center justify-center gap-1.5',
+                mode === 'server'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
+              )}
+            >
+              <Server className="w-3.5 h-3.5" />
+              {t('createTorrent.modeServer')}
+            </button>
+          </div>
+
+          {mode === 'server' && (
+            <div className="space-y-1.5">
+              <Input
+                placeholder={t('createTorrent.serverPathPlaceholder')}
+                value={serverPath}
+                onChange={(e) => setServerPath(e.target.value)}
+              />
+              <div className="text-footnote text-gray-400">{t('createTorrent.serverHint')}</div>
+            </div>
+          )}
+
+          {/* 文件选择（仅本地模式） */}
+          <div className={cn('flex gap-2', mode === 'server' && 'hidden')}>
             <input
               ref={fileInputRef}
               type="file"
@@ -165,7 +259,7 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
             </Button>
           </div>
 
-          {sources.length > 0 && (
+          {mode === 'local' && sources.length > 0 && (
             <div className="max-h-40 overflow-y-auto border border-gray-200/40 dark:border-gray-700/40 rounded-lg p-2 space-y-1">
               {sources.slice(0, 50).map((s, i) => (
                 <div key={`${s.path}-${i}`} className="flex items-center gap-2 text-footnote text-gray-600 dark:text-gray-300">
@@ -184,7 +278,7 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
               {sources.length > 50 && <div className="text-footnote text-gray-400">{t('createTorrent.moreFiles', { count: sources.length - 50 })}</div>}
             </div>
           )}
-          {sources.length > 0 && (
+          {mode === 'local' && sources.length > 0 && (
             <div className="text-footnote text-gray-500">
               {t('createTorrent.fileSummary', { count: sources.length, size: formatBytes(totalSize) })}
             </div>
@@ -222,7 +316,7 @@ export function CreateTorrentDialog({ open, onClose }: { open: boolean; onClose:
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="glass-panel-solid">
-                <SelectItem value="auto">{t('createTorrent.autoPiece')} ({formatBytes(pieceLength)})</SelectItem>
+                <SelectItem value="auto">{t('createTorrent.autoPiece')}{mode === 'local' ? ` (${formatBytes(pieceLength)})` : ''}</SelectItem>
                 {[16, 32, 64, 128, 256, 512].map((k) => (
                   <SelectItem key={k} value={`${k}k`}>{k} KB</SelectItem>
                 ))}

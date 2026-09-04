@@ -23,12 +23,15 @@ import {
   Upload,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { createPortal } from 'react-dom'
 import { useAppStore } from '@/stores/appStore'
 import { sessionApi } from '@/api/torrent'
 import { matchesStatus } from '@/hooks/useFilter'
 import { useNavRail } from '@/hooks/useNavRail'
 import { useSemanticPath } from '@/hooks/useSemanticPath'
 import { usePlatform } from '@/platform'
+import { FloatingContextMenu } from '@/components/TorrentMenu'
+import type { MenuItem } from '@/components/TorrentMenu'
 import { formatBytes, formatRatio, formatSpeed } from '@/utils/format'
 import { translateError } from '@/utils/errorText'
 import { tagColor } from '@/utils/tagColor'
@@ -1011,6 +1014,9 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
   const statusFilterVisible = useAppStore((s) => s.statusFilterVisible)
   // 与桌面端一致：遵守右键菜单里的分组显隐设置（该设置是持久化的）
   const sidebarMenuVisible = useAppStore((s) => s.sidebarMenuVisible)
+  const selectedIds = useAppStore((s) => s.selectedIds)
+  const setSelection = useAppStore((s) => s.setSelection)
+  const clearSelection = useAppStore((s) => s.clearSelection)
 
   // 下载目录可用空间（DiskRing）：抽屉未打开时不轮询，避免后台空转
   const [freeSpace, setFreeSpace] = useState<{ freeSpace: number; totalSize: number } | null>(null)
@@ -1112,6 +1118,95 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
 
   const activeStatus = filters.status[0] || 'all'
 
+  // 触屏没有双击 / 右键：长按分组行补齐「全选该组」与「为此分组添加限速规则」，
+  // 手势参数与 TorrentMenu.ContextMenuAnchor 相同（500ms、10px 抖动容差），
+  // Android 原生 contextmenu 与自实现长按去重，松手后的补发 click 吞掉（否则抽屉会先关闭）
+  const [groupMenu, setGroupMenu] = useState<{
+    pos: { x: number; y: number }
+    ids: number[]
+    scope: { kind: 'site' | 'label'; value: string } | null
+  } | null>(null)
+  const lp = useRef<{ timer: number | null; start: { x: number; y: number } | null; firedAt: number }>({
+    timer: null,
+    start: null,
+    firedAt: 0,
+  })
+  useEffect(
+    () => () => {
+      if (lp.current.timer) window.clearTimeout(lp.current.timer)
+    },
+    [],
+  )
+  const lpCancel = () => {
+    if (lp.current.timer) {
+      window.clearTimeout(lp.current.timer)
+      lp.current.timer = null
+    }
+    lp.current.start = null
+  }
+  const longPressProps = (onLongPress: (x: number, y: number) => void) => ({
+    onContextMenu: (e: React.MouseEvent) => {
+      e.preventDefault()
+      lpCancel()
+      if (Date.now() - lp.current.firedAt < 800) return
+      onLongPress(e.clientX, e.clientY)
+    },
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.pointerType === 'mouse' || e.button !== 0) return
+      lpCancel()
+      lp.current.start = { x: e.clientX, y: e.clientY }
+      const { clientX, clientY } = e
+      lp.current.timer = window.setTimeout(() => {
+        lp.current.timer = null
+        lp.current.start = null
+        lp.current.firedAt = Date.now()
+        onLongPress(clientX, clientY)
+      }, 500)
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const from = lp.current.start
+      if (!lp.current.timer || !from) return
+      if (Math.abs(e.clientX - from.x) > 10 || Math.abs(e.clientY - from.y) > 10) lpCancel()
+    },
+    onPointerUp: lpCancel,
+    onPointerCancel: lpCancel,
+    onClickCapture: (e: React.MouseEvent) => {
+      if (Date.now() - lp.current.firedAt < 800) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    },
+  })
+  const openGroupMenu = (
+    pos: { x: number; y: number },
+    ids: number[],
+    scope: { kind: 'site' | 'label'; value: string } | null,
+  ) => {
+    if (ids.length === 0) return
+    setGroupMenu({ pos, ids, scope })
+  }
+  const pickGroupMenu = (key: string) => {
+    const menu = groupMenu
+    setGroupMenu(null)
+    if (!menu) return
+    if (key === 'select') {
+      // 与桌面双击全选同语义：选区与分组完全相等才算已全选，此时再按一次是清空
+      const group = new Set(menu.ids)
+      const allIn =
+        selectedIds.length === menu.ids.length && selectedIds.every((id) => group.has(id))
+      if (allIn) clearSelection()
+      else setSelection(menu.ids)
+      onClose()
+    } else if (key === 'limit' && menu.scope) {
+      useAppStore
+        .getState()
+        .openSpeedPolicy(
+          menu.scope.kind === 'site' ? { sites: [menu.scope.value] } : { labels: [menu.scope.value] },
+        )
+      onClose()
+    }
+  }
+
   return (
     <Sheet open={visible} onOpenChange={onClose}>
       <SheetContent className="h-[78dvh] sm:max-w-sm flex flex-col" onDismiss={onClose}>
@@ -1181,6 +1276,15 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                 return (
                   <button
                     key={item.key}
+                    {...longPressProps((x, y) =>
+                      openGroupMenu(
+                        { x, y },
+                        item.key === 'all'
+                          ? torrents.map((tr) => tr.id)
+                          : torrents.filter((tr) => matchesStatus(tr, item.key)).map((tr) => tr.id),
+                        null,
+                      ),
+                    )}
                     onClick={() => {
                       setFilters({ status: item.key === 'all' ? ['all'] : [item.key] })
                       onClose()
@@ -1234,6 +1338,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                     return (
                       <button
                         key={dir}
+                        {...longPressProps((x, y) =>
+                          openGroupMenu(
+                            { x, y },
+                            torrents.filter((tr) => tr.downloadDir === dir).map((tr) => tr.id),
+                            null,
+                          ),
+                        )}
                         onClick={() => {
                           setFilters({
                             downloadDirs: isActive
@@ -1275,6 +1386,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                     return (
                       <button
                         key={msg}
+                        {...longPressProps((x, y) =>
+                          openGroupMenu(
+                            { x, y },
+                            torrents.filter((tr) => tr.errorString === msg).map((tr) => tr.id),
+                            null,
+                          ),
+                        )}
                         onClick={() => {
                           setFilters({
                             error: isActive ? filters.error.filter((e) => e !== msg) : [...filters.error, msg],
@@ -1312,6 +1430,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
               {!sidebarCollapsed.labels && (
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   <button
+                    {...longPressProps((x, y) => openGroupMenu({ x, y }, torrents.map((tr) => tr.id), null))}
                     onClick={() => { setFilters({ labels: [] }); onClose() }}
                     className={cn(
                       'tm-chip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-body font-medium transition-all tm-nav-item',
@@ -1326,6 +1445,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                   </button>
                   {noLabelCount > 0 && (
                     <button
+                      {...longPressProps((x, y) =>
+                        openGroupMenu(
+                          { x, y },
+                          torrents.filter((tr) => !tr.labels || tr.labels.length === 0).map((tr) => tr.id),
+                          null,
+                        ),
+                      )}
                       onClick={() => {
                         const isActive = filters.labels.includes('__none__')
                         setFilters({
@@ -1353,6 +1479,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                     return (
                       <button
                         key={label}
+                        {...longPressProps((x, y) =>
+                          openGroupMenu(
+                            { x, y },
+                            torrents.filter((tr) => tr.labels?.includes(label)).map((tr) => tr.id),
+                            { kind: 'label', value: label },
+                          ),
+                        )}
                         onClick={() => {
                           setFilters({ labels: isActive ? filters.labels.filter((l) => l !== label) : [...filters.labels, label] })
                           onClose()
@@ -1387,6 +1520,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
               {!sidebarCollapsed.sites && (
                 <div className="space-y-0.5 mt-1">
                 <button
+                  {...longPressProps((x, y) => openGroupMenu({ x, y }, torrents.map((tr) => tr.id), null))}
                   onClick={() => { setFilters({ sites: [] }); onClose() }}
                   className={cn(
                     'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
@@ -1405,6 +1539,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                   return (
                     <button
                       key={name}
+                      {...longPressProps((x, y) =>
+                        openGroupMenu(
+                          { x, y },
+                          torrents.filter((tr) => (torrentSites[tr.id] ?? []).includes(name)).map((tr) => tr.id),
+                          { kind: 'site', value: name },
+                        ),
+                      )}
                       onClick={() => { setFilters({ sites: isActive ? [] : [name] }); onClose() }}
                       className={cn(
                         'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
@@ -1419,6 +1560,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                 })}
                 {siteStats.other > 0 && (
                   <button
+                    {...longPressProps((x, y) =>
+                      openGroupMenu(
+                        { x, y },
+                        torrents.filter((tr) => (torrentSites[tr.id] ?? []).length === 0).map((tr) => tr.id),
+                        null,
+                      ),
+                    )}
                     onClick={() => { setFilters({ sites: ['__other__'] }); onClose() }}
                     className={cn(
                       'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-body transition-colors tm-nav-item',
@@ -1436,6 +1584,33 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
           )}
 
         </div>
+
+        {/* 长按分组菜单：portal 到 body，避免 Sheet 动画的 transform 影响固定定位 */}
+        {groupMenu && createPortal(
+          <FloatingContextMenu
+            pos={groupMenu.pos}
+            items={[
+              {
+                key: 'select',
+                icon: <Check className="w-3.5 h-3.5 text-primary shrink-0" strokeWidth={2.5} />,
+                label: t('sidebar.selectGroupAll', { n: groupMenu.ids.length }),
+              },
+              ...(groupMenu.scope
+                ? ([
+                    { type: 'divider' },
+                    {
+                      key: 'limit',
+                      icon: <Gauge className="w-3.5 h-3.5 text-primary shrink-0" />,
+                      label: t('sidebar.groupLimit'),
+                    },
+                  ] as MenuItem[])
+                : []),
+            ]}
+            onPick={pickGroupMenu}
+            onClose={() => setGroupMenu(null)}
+          />,
+          document.body,
+        )}
 
         {/* 底部：设置入口（抽屉覆盖顶栏时保持可及） */}
         <div className="border-t border-white/60 dark:border-white/10 pt-3 flex items-center">

@@ -1,5 +1,5 @@
 import { client, request } from './client'
-import type { AutoMoveRule, SeedPolicyGuard, SeedPolicyLog, SeedPolicyResult, SeedPolicyRule, ServerInfo, Session, SessionStats, SessionStatus, SpeedPolicyGuard, SpeedPolicyResult, SpeedPolicyRule, Torrent } from '@/types'
+import type { AutoMoveRule, BandwidthGroup, CreateTorrentJobStatus, CreateTorrentServerOptions, PathMapping, SeedPolicyGuard, SeedPolicyLog, SeedPolicyResult, SeedPolicyRule, ServerInfo, Session, SessionStats, SessionStatus, SpeedPolicyGuard, SpeedPolicyResult, SpeedPolicyRule, Torrent } from '@/types'
 
 // 种子相关接口
 export const torrentApi = {
@@ -71,6 +71,18 @@ export const torrentApi = {
   // 语义路径批量转换（fnOS：内部路径 → 宿主展示路径；不可用时 available=false，前端回退原始路径）
   semanticPaths: (paths: string[], language: 'zh' | 'en') =>
     request<{ available: boolean; map: Record<string, string> }>(client.post('/paths/semantic', { paths, language })),
+  // 远端→本地路径映射配置（打开目录/复制路径时的展示转换）
+  pathMap: () => request<{ mappings: PathMapping[] }>(client.get('/paths/map')),
+
+  // 后端建种：服务器路径 + 多线程哈希（提交任务 → 轮询进度 → 下载/自动添加）
+  createStart: (opts: CreateTorrentServerOptions) =>
+    request<{ jobId: string }>(client.post('/torrent-create', opts)),
+  createStatus: (jobId: string) =>
+    request<CreateTorrentJobStatus>(client.get(`/torrent-create/${jobId}`)),
+  createFile: async (jobId: string): Promise<Uint8Array> => {
+    const resp = await client.get(`/torrent-create/${jobId}/file`, { responseType: 'arraybuffer' })
+    return new Uint8Array(resp.data as ArrayBuffer)
+  },
 }
 
 // 系统命令
@@ -88,6 +100,10 @@ export const sessionApi = {
   blocklistUpdate: () => request<{ entries: number }>(client.post('/session/blocklist/update')),
   freeSpace: (path: string) =>
     request<{ path: string; freeSpace: number; totalSize: number }>(client.get('/session/free-space', { params: { path } })),
+  // 带宽组（Transmission 4.x）：列出 / 创建或更新
+  groups: () => request<BandwidthGroup[]>(client.get('/session/groups')),
+  saveGroup: (g: Partial<BandwidthGroup> & { name: string }) =>
+    request<{ saved: boolean }>(client.put('/session/groups', g)),
 }
 
 // 多服务器管理

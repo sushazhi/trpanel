@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -34,7 +35,8 @@ func (h *Handler) saveSpeedPolicyRule(c *gin.Context) {
 	if rule.ID == "" {
 		rule.ID = newID("sl")
 	}
-	_ = h.state.Update(func(st *state.State) {
+	resp := gin.H{"id": rule.ID}
+	if w := h.persistState(func(st *state.State) {
 		replaced := false
 		for i := range st.SpeedPolicyRules {
 			if st.SpeedPolicyRules[i].ID == rule.ID {
@@ -46,8 +48,10 @@ func (h *Handler) saveSpeedPolicyRule(c *gin.Context) {
 		if !replaced {
 			st.SpeedPolicyRules = append(st.SpeedPolicyRules, rule)
 		}
-	})
-	respond(c, gin.H{"id": rule.ID})
+	}); w != "" {
+		resp["warning"] = w
+	}
+	respond(c, resp)
 }
 
 // validateSpeedPolicyRule 校验规则可执行
@@ -75,7 +79,7 @@ func validateSpeedPolicyRule(rule *state.SpeedPolicyRule) error {
 func (h *Handler) deleteSpeedPolicyRule(c *gin.Context) {
 	id := c.Param("id")
 	var deleted bool
-	_ = h.state.Update(func(st *state.State) {
+	err := h.state.Update(func(st *state.State) {
 		for i := range st.SpeedPolicyRules {
 			if st.SpeedPolicyRules[i].ID == id {
 				st.SpeedPolicyRules = append(st.SpeedPolicyRules[:i], st.SpeedPolicyRules[i+1:]...)
@@ -84,11 +88,18 @@ func (h *Handler) deleteSpeedPolicyRule(c *gin.Context) {
 			}
 		}
 	})
+	if err != nil {
+		slog.Warn("状态持久化失败", "err", err)
+	}
 	if !deleted {
 		respondError(c, http.StatusBadRequest, "规则不存在")
 		return
 	}
-	respond(c, gin.H{"deleted": true})
+	resp := gin.H{"deleted": true}
+	if err != nil {
+		resp["warning"] = "已删除，但写入磁盘失败：" + err.Error()
+	}
+	respond(c, resp)
 }
 
 // saveSpeedPolicyGuard 更新引擎开关
@@ -98,8 +109,11 @@ func (h *Handler) saveSpeedPolicyGuard(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
 		return
 	}
-	_ = h.state.Update(func(st *state.State) { st.SpeedPolicyGuard = guard })
-	respond(c, gin.H{"saved": true})
+	resp := gin.H{"saved": true}
+	if w := h.persistState(func(st *state.State) { st.SpeedPolicyGuard = guard }); w != "" {
+		resp["warning"] = w
+	}
+	respond(c, resp)
 }
 
 // runSpeedPolicy 手动执行一轮组内限速分配（保存规则后无需等待下个 tick 生效）

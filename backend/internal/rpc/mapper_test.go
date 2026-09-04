@@ -3,14 +3,14 @@ package rpc
 import (
 	"testing"
 
-	trpc "github.com/hekmon/transmissionrpc/v3"
 	"github.com/hekmon/cunits/v2"
+	trpc "github.com/hekmon/transmissionrpc/v3"
 )
 
-func i64(v int64) *int64            { return &v }
-func str(v string) *string          { return &v }
-func f64(v float64) *float64        { return &v }
-func bits(v float64) *cunits.Bits   { b := cunits.ImportInByte(v); return &b }
+func i64(v int64) *int64                              { return &v }
+func str(v string) *string                            { return &v }
+func f64(v float64) *float64                          { return &v }
+func bits(v float64) *cunits.Bits                     { b := cunits.ImportInByte(v); return &b }
 func status(v trpc.TorrentStatus) *trpc.TorrentStatus { return &v }
 
 func TestMapTorrent(t *testing.T) {
@@ -70,13 +70,13 @@ func TestMapTorrentNilFields(t *testing.T) {
 func TestMapSession(t *testing.T) {
 	enc := trpc.EncryptionPreferred
 	s := trpc.SessionArguments{
-		Version:           str("4.0.5"),
-		RPCVersion:        i64(17),
-		DownloadDir:       str("/downloads"),
-		SpeedLimitDown:        i64(1000),
-		SpeedLimitUpEnabled:   boolPtr(false),
-		Encryption:            &enc,
-		StartAddedTorrents:    boolPtr(true),
+		Version:             str("4.0.5"),
+		RPCVersion:          i64(17),
+		DownloadDir:         str("/downloads"),
+		SpeedLimitDown:      i64(1000),
+		SpeedLimitUpEnabled: boolPtr(false),
+		Encryption:          &enc,
+		StartAddedTorrents:  boolPtr(true),
 	}
 	out := mapSession(s)
 	if out.Version != "4.0.5" || out.RPCVersion != 17 || out.DownloadDir != "/downloads" {

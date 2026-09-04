@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -52,7 +53,8 @@ func (h *Handler) saveSeedPolicyRule(c *gin.Context) {
 	if rule.ID == "" {
 		rule.ID = newID("sp")
 	}
-	_ = h.state.Update(func(st *state.State) {
+	resp := gin.H{"id": rule.ID}
+	if w := h.persistState(func(st *state.State) {
 		replaced := false
 		for i := range st.SeedPolicyRules {
 			if st.SeedPolicyRules[i].ID == rule.ID {
@@ -64,8 +66,10 @@ func (h *Handler) saveSeedPolicyRule(c *gin.Context) {
 		if !replaced {
 			st.SeedPolicyRules = append(st.SeedPolicyRules, rule)
 		}
-	})
-	respond(c, gin.H{"id": rule.ID})
+	}); w != "" {
+		resp["warning"] = w
+	}
+	respond(c, resp)
 }
 
 // validateSeedPolicyRule 校验规则可执行，避免误配成「无条件全站删除」
@@ -86,7 +90,7 @@ func validateSeedPolicyRule(rule *state.SeedPolicyRule) error {
 func (h *Handler) deleteSeedPolicyRule(c *gin.Context) {
 	id := c.Param("id")
 	var deleted bool
-	_ = h.state.Update(func(st *state.State) {
+	err := h.state.Update(func(st *state.State) {
 		for i := range st.SeedPolicyRules {
 			if st.SeedPolicyRules[i].ID == id {
 				st.SeedPolicyRules = append(st.SeedPolicyRules[:i], st.SeedPolicyRules[i+1:]...)
@@ -101,11 +105,18 @@ func (h *Handler) deleteSeedPolicyRule(c *gin.Context) {
 			}
 		}
 	})
+	if err != nil {
+		slog.Warn("状态持久化失败", "err", err)
+	}
 	if !deleted {
 		respondError(c, http.StatusBadRequest, "规则不存在")
 		return
 	}
-	respond(c, gin.H{"deleted": true})
+	resp := gin.H{"deleted": true}
+	if err != nil {
+		resp["warning"] = "已删除，但写入磁盘失败：" + err.Error()
+	}
+	respond(c, resp)
 }
 
 // saveSeedPolicyGuard 更新全局保护栏
@@ -120,8 +131,11 @@ func (h *Handler) saveSeedPolicyGuard(c *gin.Context) {
 	}
 	guard.ExcludeSites = cleanList(guard.ExcludeSites)
 	guard.ExcludeLabels = cleanList(guard.ExcludeLabels)
-	_ = h.state.Update(func(st *state.State) { st.SeedPolicyGuard = guard })
-	respond(c, gin.H{"saved": true})
+	resp := gin.H{"saved": true}
+	if w := h.persistState(func(st *state.State) { st.SeedPolicyGuard = guard }); w != "" {
+		resp["warning"] = w
+	}
+	respond(c, resp)
 }
 
 // runSeedPolicy 手动执行一轮做种策略
@@ -141,7 +155,7 @@ func (h *Handler) runSeedPolicy(c *gin.Context) {
 func (h *Handler) resetSeedPolicy(c *gin.Context) {
 	ruleID := c.Query("rule")
 	var cleared int
-	_ = h.state.Update(func(st *state.State) {
+	err := h.state.Update(func(st *state.State) {
 		prefix := ""
 		if ruleID != "" {
 			prefix = ruleID + "\x00"
@@ -153,13 +167,23 @@ func (h *Handler) resetSeedPolicy(c *gin.Context) {
 			}
 		}
 	})
-	respond(c, gin.H{"cleared": cleared})
+	if err != nil {
+		slog.Warn("状态持久化失败", "err", err)
+	}
+	resp := gin.H{"cleared": cleared}
+	if err != nil {
+		resp["warning"] = "已重置，但写入磁盘失败：" + err.Error()
+	}
+	respond(c, resp)
 }
 
 // clearSeedPolicyLogs 清空执行记录
 func (h *Handler) clearSeedPolicyLogs(c *gin.Context) {
-	_ = h.state.Update(func(st *state.State) { st.SeedPolicyLogs = []state.SeedPolicyLog{} })
-	respond(c, gin.H{"cleared": true})
+	resp := gin.H{"cleared": true}
+	if w := h.persistState(func(st *state.State) { st.SeedPolicyLogs = []state.SeedPolicyLog{} }); w != "" {
+		resp["warning"] = w
+	}
+	respond(c, resp)
 }
 
 // cleanList 去掉空白项，避免界面输入 "a, , b" 时留下无意义条件

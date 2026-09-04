@@ -98,8 +98,17 @@ export function useWebSocket() {
       socket.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data) as WsMessage
-          if (msg.type === 'full' || msg.type === 'update') {
+          // data 必须是数组：异常负载缺 data 时直接写入会把 torrents 置为
+          // undefined，下游 .length 访问导致整站白屏
+          if ((msg.type === 'full' || msg.type === 'update') && Array.isArray(msg.data)) {
             useAppStore.getState().setTorrents(msg.data)
+          } else if (msg.type === 'diff') {
+            // 增量推送：仅合并变化的种子；断线重连后服务端会补发全量快照，无需在此兜底
+            useAppStore.getState().applyTorrentDiff({
+              added: Array.isArray(msg.added) ? msg.added : [],
+              updated: Array.isArray(msg.updated) ? msg.updated : [],
+              removed: Array.isArray(msg.removed) ? msg.removed : [],
+            })
           }
         } catch {
           // 忽略无效消息

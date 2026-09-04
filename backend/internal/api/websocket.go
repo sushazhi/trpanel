@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/trpanel/backend/internal/models"
 	"github.com/trpanel/backend/internal/platform"
 	"github.com/trpanel/backend/internal/rpc"
 )
@@ -43,14 +45,15 @@ type Hub struct {
 	plat         platform.Platform
 	pollInterval atomic.Int64 // 纳秒，支持运行期热调整
 
-	mu           sync.RWMutex
-	lastDigest   [sha256.Size]byte // 最近一轮种子数据的摘要，用于判断是否需要广播
-	lastEnvelope []byte            // 最近一次推送的信封报文，新客户端接入时直接补发
-	clients      map[*wsClient]struct{}
-	clientCount  atomic.Int64
-	register     chan *wsClient
-	unregister   chan *wsClient
-	broadcast    chan []byte
+	mu          sync.RWMutex
+	curTorrents []*models.Torrent // 最近一轮种子快照（新客户端接入时全量补发）
+	prevByID    map[int64][]byte  // 上一轮每个种子的 JSON 字节，作为增量 diff 的基准
+	lastDigest  [sha256.Size]byte // 最近一轮种子数据的摘要，用于快速去重
+	clients     map[*wsClient]struct{}
+	clientCount atomic.Int64
+	register    chan *wsClient
+	unregister  chan *wsClient
+	broadcast   chan []byte
 	// bump 唤醒拉取协程（容量 1，多次 Bump 合并为一次补拉）
 	bump chan struct{}
 }
@@ -58,13 +61,13 @@ type Hub struct {
 // NewHub 创建 Hub（plat 提供 WebSocket 握手的同源判定策略）
 func NewHub(manager *rpc.Manager, interval time.Duration, plat platform.Platform) *Hub {
 	h := &Hub{
-		rpc:         manager,
-		plat:        plat,
-		clients:     make(map[*wsClient]struct{}),
-		register:    make(chan *wsClient),
-		unregister:  make(chan *wsClient),
-		broadcast:   make(chan []byte, 16),
-		bump:        make(chan struct{}, 1),
+		rpc:        manager,
+		plat:       plat,
+		clients:    make(map[*wsClient]struct{}),
+		register:   make(chan *wsClient),
+		unregister: make(chan *wsClient),
+		broadcast:  make(chan []byte, 16),
+		bump:       make(chan struct{}, 1),
 	}
 	h.pollInterval.Store(interval.Nanoseconds())
 	return h
@@ -99,14 +102,16 @@ func (h *Hub) run() {
 			if h.clientCount.Add(1) == 1 {
 				h.Bump()
 			}
-			// 新连接立即推送当前缓存（必须是前端可识别的信封报文）
+			// 新连接立即推送当前全量快照（增量 diff 只对已持有全量的客户端有意义）
 			h.mu.RLock()
-			last := h.lastEnvelope
+			cur := h.curTorrents
 			h.mu.RUnlock()
-			if last != nil {
-				select {
-				case client.send <- last:
-				default:
+			if cur != nil {
+				if data, err := marshalFullEnvelope(cur); err == nil {
+					select {
+					case client.send <- data:
+					default:
+					}
 				}
 			}
 		case client := <-h.unregister:
@@ -163,7 +168,7 @@ func (h *Hub) wait(ctx context.Context) bool {
 func (h *Hub) hasLastData() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.lastEnvelope != nil
+	return h.curTorrents != nil
 }
 
 // Signal 打断等待，尽快拉取一次（合并短时间内多次信号）
@@ -179,7 +184,13 @@ func (h *Hub) Signal() {
 // 导致最后一次变更要等到下个轮询周期才可见。
 func (h *Hub) Bump() { h.Signal() }
 
-// pollLocked 实际拉取逻辑（仅由 pollLoop 单协程调用；数据无变化时跳过广播）
+// pollLocked 实际拉取逻辑（仅由 pollLoop 单协程调用）。
+// 与上一轮逐种子比较字节级差异，只广播变化部分：
+//   - 首轮或前端不支持时发送 {type:"full"} 全量信封；
+//   - 之后发送 {type:"diff", added, updated, removed}，仅含变化的种子对象。
+//
+// 大多数轮询周期里只有极少数种子在动（做种中的列表几乎全部静止），
+// 增量报文通常只有全量的几十分之一，显著降低广播序列化与带宽开销。
 func (h *Hub) pollLocked() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -188,36 +199,127 @@ func (h *Hub) pollLocked() {
 		slog.Error("轮询种子失败", "err", err)
 		return
 	}
-	// 差异比较仅基于种子数据（不含 timestamp，否则每次不同导致去重失效）。
-	// 用摘要而不是整份 JSON 做比较：数百种子时避免常驻大块字节并逐轮整段比对。
-	// 只序列化一次：torrentsData 同时用于摘要计算与信封的 data 字段（json.RawMessage 复用字节），
-	// 避免旧实现里同一份数据被 json.Marshal 两次、每轮峰值多出一整份 JSON 的浪费。
-	torrentsData, err := json.Marshal(torrents)
-	if err != nil {
-		slog.Error("序列化种子数据失败", "err", err)
-		return
+	// 每个种子只序列化一次，字节切片同时用于 diff 比较与信封拼装
+	bodies := make([][]byte, len(torrents))
+	byID := make(map[int64][]byte, len(torrents))
+	ids := make([]int64, len(torrents))
+	for i, t := range torrents {
+		b, err := json.Marshal(t)
+		if err != nil {
+			slog.Error("序列化种子数据失败", "err", err)
+			return
+		}
+		bodies[i] = b
+		ids[i] = t.ID
+		byID[t.ID] = b
 	}
-	digest := sha256.Sum256(torrentsData)
+
+	var data []byte
+	h.mu.RLock()
+	prev := h.prevByID
+	h.mu.RUnlock()
+
+	if prev == nil {
+		// 首轮：全量信封
+		full := joinBodies(bodies)
+		data, err = json.Marshal(map[string]interface{}{
+			"type":      "full",
+			"data":      json.RawMessage(full),
+			"timestamp": time.Now().UnixMilli(),
+		})
+		if err != nil {
+			slog.Error("序列化推送数据失败", "err", err)
+			return
+		}
+	} else {
+		// 逐种子 diff
+		var addedIDs, updatedIDs []int
+		var removed []int64
+		for i, id := range ids {
+			if old, ok := prev[id]; !ok {
+				addedIDs = append(addedIDs, i)
+			} else if !bytes.Equal(old, bodies[i]) {
+				updatedIDs = append(updatedIDs, i)
+			}
+		}
+		prevIDs := make(map[int64]struct{}, len(prev))
+		for id := range prev {
+			prevIDs[id] = struct{}{}
+			if _, ok := byID[id]; !ok {
+				removed = append(removed, id)
+			}
+		}
+		if len(addedIDs) == 0 && len(updatedIDs) == 0 && len(removed) == 0 {
+			// 完全无变化：仅推进基准（内容等价），跳过广播
+			h.mu.Lock()
+			h.curTorrents = torrents
+			h.prevByID = byID
+			h.mu.Unlock()
+			return
+		}
+		added := make([]json.RawMessage, 0, len(addedIDs))
+		for _, i := range addedIDs {
+			added = append(added, json.RawMessage(bodies[i]))
+		}
+		updated := make([]json.RawMessage, 0, len(updatedIDs))
+		for _, i := range updatedIDs {
+			updated = append(updated, json.RawMessage(bodies[i]))
+		}
+		data, err = json.Marshal(map[string]interface{}{
+			"type":      "diff",
+			"added":     added,
+			"updated":   updated,
+			"removed":   removed,
+			"timestamp": time.Now().UnixMilli(),
+		})
+		if err != nil {
+			slog.Error("序列化推送数据失败", "err", err)
+			return
+		}
+	}
+
+	// 快速去重：整体摘要未变则不广播（与逐种子比较结论一致，但 O(1) 比对）
+	digest := sha256.Sum256(joinBodies(bodies))
 	h.mu.Lock()
-	unchanged := h.lastEnvelope != nil && h.lastDigest == digest
-	h.mu.Unlock()
-	if unchanged {
-		return
-	}
-	data, err := json.Marshal(map[string]interface{}{
-		"type":      "full",
-		"data":      json.RawMessage(torrentsData),
-		"timestamp": time.Now().UnixMilli(),
-	})
-	if err != nil {
-		slog.Error("序列化推送数据失败", "err", err)
-		return
-	}
-	h.mu.Lock()
+	h.curTorrents = torrents
+	h.prevByID = byID
 	h.lastDigest = digest
-	h.lastEnvelope = data
 	h.mu.Unlock()
 	h.broadcast <- data
+}
+
+// joinBodies 将各种子的 JSON 字节拼装为 JSON 数组体（含方括号）
+func joinBodies(bodies [][]byte) []byte {
+	n := 2
+	for _, b := range bodies {
+		n += len(b) + 1
+	}
+	out := make([]byte, 0, n)
+	out = append(out, '[')
+	for i, b := range bodies {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, b...)
+	}
+	return append(out, ']')
+}
+
+// marshalFullEnvelope 构建全量信封报文（新客户端接入时补发）
+func marshalFullEnvelope(torrents []*models.Torrent) ([]byte, error) {
+	bodies := make([][]byte, len(torrents))
+	for i, t := range torrents {
+		b, err := json.Marshal(t)
+		if err != nil {
+			return nil, err
+		}
+		bodies[i] = b
+	}
+	return json.Marshal(map[string]interface{}{
+		"type":      "full",
+		"data":      json.RawMessage(joinBodies(bodies)),
+		"timestamp": time.Now().UnixMilli(),
+	})
 }
 
 // HandleWS 处理 WebSocket 连接

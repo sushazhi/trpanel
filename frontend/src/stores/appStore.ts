@@ -120,6 +120,7 @@ export interface AppState {
   resetSemantic: () => void
   setWsStatus: (s: AppState['wsStatus']) => void
   setTorrents: (list: Torrent[]) => void
+  applyTorrentDiff: (d: { added: Torrent[]; updated: Torrent[]; removed: number[] }) => void
   toggleSelect: (id: number) => void
   setSelection: (ids: number[]) => void
   setSelectAnchor: (id: number | null) => void
@@ -199,6 +200,15 @@ export const useAppStore = create<AppState>()(
       resetSemantic: () => set({ semanticDirs: {} }),
       setWsStatus: (s) => set({ wsStatus: s }),
       setTorrents: (list) => set({ torrents: list }),
+      // 增量推送合并：仅更新变化的种子，未变化的保持引用不变（利于 memo 跳过重渲染）
+      applyTorrentDiff: ({ added, updated, removed }) =>
+        set((state) => {
+          const map = new Map(state.torrents.map((t) => [t.id, t]))
+          for (const id of removed) map.delete(id)
+          for (const t of added) map.set(t.id, t)
+          for (const t of updated) map.set(t.id, t)
+          return { torrents: Array.from(map.values()) }
+        }),
       toggleSelect: (id) =>
         set((state) => ({
           selectedIds: state.selectedIds.includes(id)

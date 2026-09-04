@@ -110,14 +110,18 @@ func (p SecurityPolicy) ContentSecurityPolicy(host string) string {
 	return strings.Join(parts, "; ")
 }
 
-// FileAccess 「按路径添加种子」时的本地文件读取策略。
+// FileAccess 「按路径添加种子」与「后端建种」的本地文件读取策略。
 // 默认实现拒绝一切读取，避免把服务变成任意文件读取接口。
 type FileAccess interface {
 	// Enabled 宿主是否支持按路径读取种子文件
 	Enabled() bool
 	// AllowRead 校验是否允许读取该路径，返回解析过符号链接后的真实路径。
 	// 调用方必须打开返回的路径而非原始入参，否则校验的是一个路径、读取的是另一个路径。
+	// 仅允许普通文件。
 	AllowRead(path string) (string, error)
+	// AllowReadDir 校验是否允许以目录为单位读取（后端建种场景），
+	// 返回解析过符号链接后的真实目录路径。仅允许普通目录。
+	AllowReadDir(path string) (string, error)
 }
 
 // Platform 宿主平台。新增宿主只需实现本接口并在 init 中调用 Register。

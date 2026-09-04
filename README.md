@@ -31,10 +31,10 @@
 | 🧰 | **多维筛选 / 排序** | 状态 / 标签 / 站点 / 目录 / 错误状态 + 状态优先级 + 二级字段多级排序 |
 | 🖥️ | **桌面交互** | 鼠标虚拟滚动表格 + 右键菜单 + 拖拽排序 + 可伸缩侧栏（持久化） + 表头右键管理列 |
 | 📱 | **触屏交互** | 玻璃卡片列表，长按 / ⋮ 唤出菜单，左右滑切换分类，勾选进入批量，动作条"全选"补齐分组，底部悬浮胶囊承载添加 / 启停 / 清理 |
-| 🌐 | **会话与全局** | 多服务器切换、全局限速、带宽定时调度、下载 / 做种队列、轮询间隔 |
-| 🛠 | **工具集** | 浏览器端 `.torrent` 创建（bencode + 分片 SHA1）、按分享率 / 做种时长批量清理已完成种子 |
+| 🌐 | **会话与全局** | 多服务器切换、全局限速、带宽定时调度、下载 / 做种队列、轮询间隔、**带宽组管理**（Transmission 4.x） |
+| 🛠 | **工具集** | 浏览器端 `.torrent` 创建（bencode + 分片 SHA1）、**服务器路径建种**（后端多线程哈希，大文件秒级完成）、按分享率 / 做种时长批量清理已完成种子 |
 | 🤖 | **自动化** | 已完成种子按站点归档；**做种策略**按站点分享率 / 做种天数 / 上传量目标达标后暂停 / 删除 / 删除并清理文件 |
-| 🤝 | **MCP 服务** | 内置 MCP 端点（`/mcp`），Claude / Qoder 等 AI 客户端可直接查询种子、做种策略达标报告并执行添加 / 启停操作；「设置 → 自动化 → MCP 服务」开启，独立接入令牌鉴权，删除默认关闭 |
+| 🤝 | **MCP 服务** | 内置 MCP 端点（`/mcp`），Claude / Qoder 等 AI 客户端可直接查询种子 / 站点 / 会话配置与磁盘空间，执行添加、启停、校验、重宣告、限速、打标签、队列调整等操作；「设置 → 自动化 → MCP 服务」开启，独立接入令牌鉴权，删除与移动 / 重命名 / 立即执行做种策略等高危操作默认关闭 |
 | 📈 | **图表统计** | 速度历史曲线 + 统计仪表盘 |
 | 📲 | **PWA** | 可安装、离线缓存、新版本更新提示、键盘快捷键（`N` / `Space` / `Delete` / `Ctrl+A` / `/` / `Esc` / `Ctrl±`） |
 | 🎨 | **外观** | 明 / 暗主题、中 / 英文、**可调玻璃浓度**、**背景壁纸**（作为玻璃折射色源形成色彩流动） |
@@ -347,9 +347,10 @@ dev/
 trpanel 内置 MCP（Model Context Protocol）服务，AI 客户端可通过自然语言管理 Transmission。推荐直接在 Web「设置 → 自动化 → MCP 服务」中开启并配置（即时生效，保存后写入 `.env.local`）；也可在配置文件中设置启动初值：
 
 ```yaml
-mcp_enabled: true        # 启用 MCP 端点 /mcp
-mcp_allow_delete: false  # 删除类工具默认关闭，需显式开启
-mcp_token: ""            # 接入令牌，留空 = 不启用鉴权
+mcp_enabled: true          # 启用 MCP 端点 /mcp
+mcp_allow_delete: false    # 删除类工具默认关闭，需显式开启
+mcp_allow_dangerous: false # 移动 / 重命名 / 立即执行做种策略等其它高危操作，默认关闭
+mcp_token: ""              # 接入令牌，留空 = 不启用鉴权
 ```
 
 客户端接入示例（Claude Desktop / Qoder / Cursor 等支持 streamable HTTP 的 MCP 客户端）：
@@ -366,9 +367,33 @@ mcp_token: ""            # 接入令牌，留空 = 不启用鉴权
 ```
 
 - **鉴权**：`/mcp` 使用独立接入令牌 `MCP_TOKEN`（与 `API_TOKEN` 互不相干），在 Web「设置 → 自动化 → MCP 服务」中即可配置，修改后即时生效——记得同步更新 AI 客户端配置；留空表示不启用鉴权，此时仅建议在回环 / 内网环境使用。飞牛应用经统一网关访问界面（登录态即鉴权），但外部 AI 客户端无法通过网关鉴权——需直连服务端口
-- **只读工具**：`list_torrents`（关键词 / 状态 / 站点过滤）、`get_torrent`、`get_stats`、`get_seed_policy_report`（做种策略规则 + 已达标未处理的种子与依据，只读评估不会执行动作）
-- **写操作工具**：`add_torrent`（磁力 / URL / 白名单路径，默认以暂停状态添加）、`start_torrents`、`stop_torrents`
-- **删除工具**：`remove_torrents`（`deleteData=true` 连同本地文件）仅在设置界面「允许通过 MCP 删除种子」（即 `mcp_allow_delete: true`）开启时可用
+
+**工具清单**（按风险分级，高危工具需在设置界面显式开启）：
+
+| 级别 | 工具 | 说明 |
+|:--|:--|:--|
+| 🔍 只读 | `list_torrents` | 列出种子，支持关键词 / 状态 / 站点过滤 |
+| 🔍 只读 | `get_torrent` | 单个种子详情（文件 / Peers / Tracker 状态） |
+| 🔍 只读 | `get_stats` | 会话统计：版本、种子数、当前与累计上传 / 下载量 |
+| 🔍 只读 | `get_free_space` | 查询目录剩余空间（留空用全局下载目录） |
+| 🔍 只读 | `get_session_config` | 会话配置摘要：下载目录 / 限速 / 队列 / 黑名单等 |
+| 🔍 只读 | `test_port` | 监听端口外网可达性检测 |
+| 🔍 只读 | `get_torrent_sites` | 站点汇总与种子归属 |
+| 🔍 只读 | `get_seed_policy_report` | 做种策略规则 + 已达标种子及依据（只读评估，不执行） |
+| ✏️ 写操作 | `add_torrent` | 磁力 / URL / 白名单路径添加，默认以暂停状态添加 |
+| ✏️ 写操作 | `start_torrents` / `stop_torrents` | 批量开始 / 暂停 |
+| ✏️ 写操作 | `verify_torrents` | 批量触发本地数据校验 |
+| ✏️ 写操作 | `reannounce_torrents` | 批量重新宣告 Tracker |
+| ✏️ 写操作 | `set_torrent_labels` | 批量设置标签（整体覆盖） |
+| ✏️ 写操作 | `set_torrent_limits` | 单种上传 / 下载限速（KB/s）与是否遵循全局限速 |
+| ✏️ 写操作 | `queue_move` | 队列排序（top / up / down / bottom） |
+| ✏️ 写操作 | `update_blocklist` | 更新黑名单规则 |
+| ✏️ 写操作 | `set_session_config` | 修改会话设置：下载目录（仅影响新添加的种子）、限速（全局 / 备用含定时）、队列、网络（端口 / 加密 / DHT / PEX 等）、做种策略默认值、黑名单、磁盘缓存 |
+| ⚠️ 高危 | `remove_torrents` | 批量删除种子，`deleteData=true` 连同本地文件（需开启「允许通过 MCP 删除种子」） |
+| ⚠️ 高危 | `move_torrents` | 批量移动数据目录，可实际搬移文件（需开启「允许通过 MCP 执行高危操作」） |
+| ⚠️ 高危 | `rename_file` | 重命名种子内文件 / 目录（需开启「允许通过 MCP 执行高危操作」） |
+| ⚠️ 高危 | `execute_seed_policy` | 立即执行一轮做种策略，按规则暂停或删除（需开启「允许通过 MCP 执行高危操作」） |
+| 🧩 透传 | `transmission_api_request` | 通用透传：直接调用 Transmission 官方 RPC 白名单方法（含库未封装能力）。只读方法直接可用；写方法需开启「允许通过 MCP 执行高危操作」；`session-close` 与脚本类配置永久屏蔽 |
 
 ### 进阶
 
@@ -395,9 +420,11 @@ mcp_token: ""            # 接入令牌，留空 = 不启用鉴权
 | `TM_PLATFORM` | 自动推断 | 宿主平台：`generic`（默认） / `fnos` |
 | `GATEWAY_PREFIX` | 空 | 宿主网关挂载的 URL 前缀（如 `/app/transmission`） |
 | `TORRENT_PATH_ROOTS` | `/vol,/mnt,/media,/volume1` | 「按路径添加种子」允许读取的根目录（逗号分隔；按解析符号链接后的真实路径判定，仅允许普通文件） |
+| `PATH_MAPPINGS` | 空 | 远端→本地路径映射（逗号分隔，每项 `远端路径=本地路径`）；Transmission 跑在容器内等路径不一致场景，用于「打开所在文件夹」「复制路径」的展示转换 |
 | `SERVER_SOCKET` | 空 | Unix socket 监听路径（宿主网关接入用） |
 | `MCP_ENABLED` | `false` | 启用 MCP 服务（`/mcp` 端点，供 AI 客户端接入） |
 | `MCP_ALLOW_DELETE` | `false` | 允许通过 MCP 删除种子（`deleteData=true` 时连同本地文件） |
+| `MCP_ALLOW_DANGEROUS` | `false` | 允许通过 MCP 执行其它高危操作（移动 / 重命名种子文件、立即执行做种策略） |
 | `MCP_TOKEN` | 空 | MCP 接入令牌（独立于 `API_TOKEN`，仅作用于 `/mcp`）；留空 = 不启用鉴权 |
 
 配置优先级：**环境变量 > `.env.local` > `.env` > `config.yaml` > 默认值**

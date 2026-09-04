@@ -66,6 +66,9 @@ type Torrent struct {
 	UploadLimit         int64    `json:"uploadLimit"`
 	HonorsSessionLimits bool     `json:"honorsSessionLimits"`
 
+	// 带宽组（Transmission 4.x），列表与详情均返回（raw RPC 合并）
+	Groups []string `json:"groups,omitempty"`
+
 	// TrackerStats 列表与详情均返回（列表列显示主 Tracker 主机名）
 	TrackerStats []TrackerStat `json:"trackerStats,omitempty"`
 
@@ -80,6 +83,22 @@ type Torrent struct {
 	Pieces     string `json:"pieces,omitempty"`
 	PieceCount int64  `json:"pieceCount,omitempty"`
 	PieceSize  int64  `json:"pieceSize,omitempty"`
+}
+
+// BandwidthGroup 带宽组（Transmission 4.x group-get / group-set）
+type BandwidthGroup struct {
+	Name                string `json:"name"`
+	DownKB              int64  `json:"downKB"` // KB/s，0 = 不限
+	UpKB                int64  `json:"upKB"`   // KB/s，0 = 不限
+	DownEnabled         bool   `json:"downEnabled"`
+	UpEnabled           bool   `json:"upEnabled"`
+	HonorsSessionLimits bool   `json:"honorsSessionLimits"`
+}
+
+// PathMapping 远端（Transmission 视角）→ 本地（宿主视角）路径映射
+type PathMapping struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 // FileInfo 文件信息

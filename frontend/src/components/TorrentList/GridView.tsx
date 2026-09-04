@@ -11,6 +11,7 @@ import { useResponsive } from '@/hooks/useResponsive'
 import { useRevealPath } from '@/hooks/useRevealPath'
 import { usePlatform } from '@/platform'
 import { RemoveTorrentDialog, ReplaceTrackerDialog } from '@/components/ToolsDialogs'
+import { mapPath } from '@/utils/pathMapping'
 import { toast } from '@/lib/toast'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ProgressBar } from '@/components/TorrentList/ProgressBar'
@@ -120,7 +121,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
     else if (key.startsWith('queue:')) actions.queue(id, key.split(':')[1] as 'top' | 'up' | 'down' | 'bottom')
     else if (key === 'copyMagnet') { void navigator.clipboard?.writeText(torrent.magnetLink).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
     else if (key === 'copyName') { void navigator.clipboard?.writeText(torrent.name).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
-    else if (key === 'copyPath') { void navigator.clipboard?.writeText(torrent.downloadDir).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
+    else if (key === 'copyPath') { void mapPath(torrent.downloadDir).then((p) => navigator.clipboard?.writeText(p)).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
     else if (key === 'remove') setRemoveIds([id])
     else if (key === 'openDir') { void revealPath(torrent.downloadDir || '') }
     else if (key === 'deleteCompleted') onOpenBatchClean?.()

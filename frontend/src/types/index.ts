@@ -105,6 +105,8 @@ export interface Torrent {
   seedRatioMode: number
   bandwidthPriority: number
   sequentialDownload: boolean
+  // 带宽组（Transmission 4.x）
+  groups?: string[]
   honorsSessionLimits: boolean
   downloadLimited: boolean
   downloadLimit: number
@@ -206,11 +208,63 @@ export interface ApiResponse<T = unknown> {
   data: T
 }
 
-// WebSocket 消息
-export interface WsMessage {
+// WebSocket 消息：全量快照（full/update）与增量推送（diff）两种
+export interface WsFullMessage {
   type: 'full' | 'update' | 'ping'
-  data: Torrent[]
+  data?: Torrent[]
   timestamp: number
+}
+
+// 增量推送：仅包含变化的种子（added/updated 为完整种子对象，removed 为 id 列表）
+export interface WsDiffMessage {
+  type: 'diff'
+  added: Torrent[]
+  updated: Torrent[]
+  removed: number[]
+  timestamp: number
+}
+
+export type WsMessage = WsFullMessage | WsDiffMessage
+
+// 带宽组（Transmission 4.x）
+export interface BandwidthGroup {
+  name: string
+  downKB: number
+  upKB: number
+  downEnabled: boolean
+  upEnabled: boolean
+  honorsSessionLimits: boolean
+}
+
+// 后端建种任务状态
+export interface CreateTorrentJobStatus {
+  status: 'running' | 'done' | 'error'
+  processed: number
+  total: number
+  name: string
+  error: string
+  autoAdded: boolean
+}
+
+// 后端建种请求参数
+export interface CreateTorrentServerOptions {
+  path: string
+  announce?: string
+  announceList?: string[]
+  comment?: string
+  private?: boolean
+  pieceLength?: number
+  webSeeds?: string[]
+  autoAdd?: boolean
+  downloadDir?: string
+  paused?: boolean
+  labels?: string[]
+}
+
+// 路径映射（远端 Transmission 路径 → 宿主本地路径）
+export interface PathMapping {
+  from: string
+  to: string
 }
 
 // 表格列配置

@@ -1,7 +1,10 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
+	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
@@ -20,25 +23,31 @@ import (
 // 设置界面修改后立即生效；下次启动的初值仍来自配置文件/环境变量。
 // Token 为 MCP 接入令牌（nil 或空 = 不启用鉴权），设置界面可热更新
 type McpControl struct {
-	Enabled     atomic.Bool
-	AllowDelete atomic.Bool
-	Token       atomic.Pointer[string]
+	Enabled        atomic.Bool
+	AllowDelete    atomic.Bool
+	AllowDangerous atomic.Bool
+	Token          atomic.Pointer[string]
 }
 
 // Handler API 处理器
 type Handler struct {
-	rpc         *rpc.Manager
-	hub         *Hub
-	geo         *GeoService
-	state       *state.Store
-	automove    *automove.Service
-	seedpolicy  *seedpolicy.Service
-	speedpolicy *speedpolicy.Service
-	plat        platform.Platform
-	dataDir     string
-	apiToken    string
-	mcpPort     string
-	mcp         *McpControl
+	rpc          *rpc.Manager
+	hub          *Hub
+	geo          *GeoService
+	state        *state.Store
+	automove     *automove.Service
+	seedpolicy   *seedpolicy.Service
+	speedpolicy  *speedpolicy.Service
+	plat         platform.Platform
+	dataDir      string
+	apiToken     string
+	mcpPort      string
+	mcp          *McpControl
+	pathMappings []models.PathMapping
+
+	// 后端建种任务表（见 createtorrent.go）
+	createMu   sync.Mutex
+	createJobs map[string]*createJob
 }
 
 // NewHandler 创建处理器。
@@ -46,20 +55,40 @@ type Handler struct {
 // mcp 为 MCP 服务的运行期开关，与 main 中 /mcp 路由的 gate 共享同一实例。
 func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store, moveSvc *automove.Service, policySvc *seedpolicy.Service, speedSvc *speedpolicy.Service, cfg *config.Config, plat platform.Platform, mcp *McpControl) *Handler {
 	return &Handler{
-		rpc:         manager,
-		hub:         hub,
-		geo:         geo,
-		state:       st,
-		automove:    moveSvc,
-		seedpolicy:  policySvc,
-		speedpolicy: speedSvc,
-		plat:        plat,
-		dataDir:     cfg.DataDir,
-		apiToken:    cfg.APIToken,
-		mcpPort:     cfg.MCPPort,
-		mcp:         mcp,
+		rpc:          manager,
+		hub:          hub,
+		geo:          geo,
+		state:        st,
+		automove:     moveSvc,
+		seedpolicy:   policySvc,
+		speedpolicy:  speedSvc,
+		plat:         plat,
+		dataDir:      cfg.DataDir,
+		apiToken:     cfg.APIToken,
+		mcpPort:      cfg.MCPPort,
+		mcp:          mcp,
+		pathMappings: parsePathMappings(cfg.PathMappings),
+		createJobs:   make(map[string]*createJob),
 	}
 }
+
+// parsePathMappings 解析「远端路径=本地路径」映射配置，非法项忽略并告警
+func parsePathMappings(raw []string) []models.PathMapping {
+	var out []models.PathMapping
+	for _, item := range raw {
+		from, to, found := strings.Cut(item, "=")
+		from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+		if !found || from == "" || to == "" {
+			slog.Warn("PATH_MAPPINGS 配置项非法，已忽略（应为 远端路径=本地路径）", "item", item)
+			continue
+		}
+		out = append(out, models.PathMapping{From: from, To: to})
+	}
+	return out
+}
+
+// maxAPIBodySize /api 请求体整体上限（20MB）：最大单项是 10MB 的种子文件，留出 multipart 元数据余量
+const maxAPIBodySize = 20 << 20
 
 // Register 注册所有路由。
 // 身份认证默认交由宿主网关或反向代理承担，但本服务仍强制校验写请求的同源性
@@ -67,7 +96,7 @@ func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store
 // prefix：网关部署时传入（如 /app/transmission），路由直接挂在带前缀路径下；
 // Gin 在中间件执行前即按原始 URL.Path 匹配路由，故不能在中间件里改前缀。
 func (h *Handler) Register(r *gin.Engine, prefix string) {
-	guard := []gin.HandlerFunc{middleware.SameOriginWriteGuard(h.plat)}
+	guard := []gin.HandlerFunc{middleware.BodyLimit(maxAPIBodySize), middleware.SameOriginWriteGuard(h.plat)}
 	if h.apiToken != "" {
 		guard = append(guard, middleware.Auth(h.apiToken))
 	}
@@ -79,6 +108,10 @@ func (h *Handler) Register(r *gin.Engine, prefix string) {
 		api.GET("/torrents/:id", h.getTorrent)
 		api.POST("/torrents/add", h.addTorrent)
 		api.POST("/torrents/add-batch", h.addTorrentBatch)
+		// 后端建种（服务器路径 + 多线程哈希）。独立前缀，避免与 /torrents/:id 路由冲突
+		api.POST("/torrent-create", h.createTorrent)
+		api.GET("/torrent-create/:jobId", h.createTorrentStatus)
+		api.GET("/torrent-create/:jobId/file", h.createTorrentFile)
 		api.POST("/torrents/replace-tracker", h.replaceTracker)
 		api.POST("/torrents/:id/start", h.startTorrent)
 		api.POST("/torrents/:id/start-now", h.startNowTorrent)
@@ -109,6 +142,9 @@ func (h *Handler) Register(r *gin.Engine, prefix string) {
 		api.GET("/session/port-test", h.portTest)
 		api.POST("/session/blocklist/update", h.blocklistUpdate)
 		api.GET("/session/free-space", h.freeSpace)
+		// 带宽组（Transmission 4.x group-get / group-set）
+		api.GET("/session/groups", h.listGroups)
+		api.PUT("/session/groups", h.saveGroup)
 		// 连接配置（界面设置）
 		api.GET("/settings", h.getSettings)
 		api.PUT("/settings", h.updateSettings)
@@ -138,6 +174,8 @@ func (h *Handler) Register(r *gin.Engine, prefix string) {
 		api.POST("/speedpolicy/run", h.runSpeedPolicy)
 		// Peer 地理位置
 		api.POST("/peers/geo", h.lookupPeers)
+		// 远端→本地路径映射（打开目录/复制路径时的展示转换）
+		api.GET("/paths/map", h.listPathMappings)
 		// 系统命令
 		api.POST("/system/:action", h.systemCommand)
 	}
@@ -161,4 +199,16 @@ func respond(c *gin.Context, data interface{}) {
 // 统一经 rpc.SanitizeClientMsg 处理：上游 RPC 错误可能内嵌带凭据的地址，不做脱敏即等于泄露密码。
 func respondError(c *gin.Context, status int, msg string) {
 	c.JSON(status, models.Error(rpc.SanitizeClientMsg(msg)))
+}
+
+// persistState 执行状态修改并持久化。
+// 磁盘写入失败（磁盘满、IO 错误等）时内存中的修改依然生效，但重启后会丢失：
+// 记录告警并返回提示文案（空串表示成功），由调用方把 warning 附加到响应，
+// 避免接口照常返回成功、用户误以为规则已可靠保存。
+func (h *Handler) persistState(fn func(*state.State)) string {
+	if err := h.state.Update(fn); err != nil {
+		slog.Warn("状态持久化失败，重启后将丢失本次修改", "err", err)
+		return "修改已生效，但写入磁盘失败：" + err.Error()
+	}
+	return ""
 }

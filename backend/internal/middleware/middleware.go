@@ -17,6 +17,18 @@ func respondForbidden(c *gin.Context, status int, msg string) {
 	c.AbortWithStatusJSON(status, gin.H{"code": 1, "message": msg})
 }
 
+// BodyLimit 限制请求体大小。gin 的 c.FormFile / ShouldBindJSON 会解析整个请求体
+// （multipart 超出内存部分 spool 到磁盘临时文件），仅靠单个文件字段的大小校验
+// 挡不住超大整体请求：可被用来耗尽磁盘/连接（Slowloris body 变体）。
+func BodyLimit(max int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, max)
+		}
+		c.Next()
+	}
+}
+
 // CORS 跨域中间件：仅放行同站来源与平台白名单中的开发前端源，
 // 且不携带凭证，杜绝任意网站跨域读取响应。
 func CORS(p platform.Platform) gin.HandlerFunc {

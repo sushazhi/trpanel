@@ -282,31 +282,44 @@ func (u *updateHandler) check(c *gin.Context) {
 // install POST /api/update/install 后台下载当前架构的 fpk 更新包
 func (u *updateHandler) install(c *gin.Context) {
 	svc := u.svc
+	// 检查与置位必须在同一临界区：否则两个并发 install 都能在置位前通过检查，
+	// 各自 performUpdate 并发写同一个 .part 文件，导致更新包交错损坏
 	svc.mu.Lock()
 	if svc.updating {
 		svc.mu.Unlock()
 		respondError(c, http.StatusConflict, "正在下载更新包，请稍候")
 		return
 	}
+	svc.updating, svc.failed, svc.progress = true, false, 0
+	svc.message = "正在检查新版本..."
 	svc.mu.Unlock()
+
+	// 网络请求/校验失败时必须释放占位，否则 updating 卡死为 true，后续更新永久 409
+	release := func() {
+		svc.mu.Lock()
+		svc.updating = false
+		svc.mu.Unlock()
+	}
 
 	info, err := fetchLatestRelease()
 	if err != nil {
+		release()
 		respondError(c, http.StatusInternalServerError, "获取版本信息失败: "+err.Error())
 		return
 	}
 	if info.FPKURL == "" {
+		release()
 		respondError(c, http.StatusBadRequest, "未找到当前架构的更新包")
 		return
 	}
 	if m := reFPKVersion.FindStringSubmatch(info.FPKName); m != nil && m[1] != info.Version {
+		release()
 		respondError(c, http.StatusInternalServerError,
 			fmt.Sprintf("版本信息不一致: API 返回 %s，更新包指向 %s", info.Version, m[1]))
 		return
 	}
 
 	svc.mu.Lock()
-	svc.updating, svc.failed, svc.progress = true, false, 0
 	svc.message = "正在准备更新..."
 	svc.latest, svc.fpkName = info.Version, info.FPKName
 	svc.mu.Unlock()

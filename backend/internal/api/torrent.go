@@ -195,6 +195,10 @@ func (h *Handler) addTorrent(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "缺少 URL、磁力链接或种子路径")
 		return
 	}
+	if !validTorrentLink(link) {
+		respondError(c, http.StatusBadRequest, "URL 仅支持 http(s) 链接或磁力链接")
+		return
+	}
 	id, err := h.rpc.Client().AddTorrentByURL(ctx, link, body.DownloadDir, body.Paused, body.Labels, body.BandwidthPriority)
 	if err != nil {
 		respondError(c, http.StatusBadGateway, "添加种子失败: "+err.Error())
@@ -207,6 +211,24 @@ func (h *Handler) addTorrent(c *gin.Context) {
 		}
 	}
 	respond(c, gin.H{"id": id})
+}
+
+// validTorrentLink 校验 URL/磁力链接的 scheme。
+// Transmission 的 torrent-add filename 参数原生支持本地路径：若不限制 scheme，
+// 攻击者可用 url 字段传任意本地路径，借 Transmission 进程权限绕过面板的
+// TORRENT_PATH_ROOTS 文件读取白名单（readTorrentFile 的校验形同虚设），
+// 同时也构成由 Transmission 发起的任意出网下载。
+func validTorrentLink(link string) bool {
+	l := strings.ToLower(link)
+	return strings.HasPrefix(l, "http://") ||
+		strings.HasPrefix(l, "https://") ||
+		strings.HasPrefix(l, "magnet:")
+}
+
+// validSeedIdleLimit 校验做种空闲上限（分钟）：int64 分钟 × 60e9 纳秒（time.Minute）
+// 对异常大值会环绕成负数 Duration 传给 Transmission
+func validSeedIdleLimit(limit *int64) bool {
+	return limit == nil || (*limit >= 0 && *limit <= 1_000_000)
 }
 
 // readTorrentFile 按宿主机路径读取种子内容（如 fnOS 文件选择器返回的路径）。
@@ -240,6 +262,12 @@ func (h *Handler) addTorrentBatch(c *gin.Context) {
 	if len(body.URLs) == 0 {
 		respondError(c, http.StatusBadRequest, "urls 不能为空")
 		return
+	}
+	for _, url := range body.URLs {
+		if !validTorrentLink(url) {
+			respondError(c, http.StatusBadRequest, "URL 仅支持 http(s) 链接或磁力链接: "+url)
+			return
+		}
 	}
 	ids := make([]int64, 0, len(body.URLs))
 	for _, url := range body.URLs {
@@ -408,28 +436,29 @@ func (h *Handler) queueMove(c *gin.Context) {
 
 // torrentUpdateBody 种子属性修改请求体（单条/批量共用）
 type torrentUpdateBody struct {
-	Location            *string  `json:"location"`
-	Move                *bool    `json:"move"`
-	SequentialDownload  *bool    `json:"sequentialDownload"`
-	Labels              []string `json:"labels"`
-	BandwidthPriority   *int64   `json:"bandwidthPriority"`
-	TrackerList         []string `json:"trackerList"`
-	DownloadLimit       *int64   `json:"downloadLimit"`
-	DownloadLimited     *bool    `json:"downloadLimited"`
-	UploadLimit         *int64   `json:"uploadLimit"`
-	UploadLimited       *bool    `json:"uploadLimited"`
-	HonorsSessionLimits *bool    `json:"honorsSessionLimits"`
-	PeerLimit           *int64   `json:"peerLimit"`
-	SeedRatioLimit      *float64 `json:"seedRatioLimit"`
-	SeedRatioMode       *int64   `json:"seedRatioMode"`
-	QueuePosition       *int64   `json:"queuePosition"`
-	FilesWanted         []int64  `json:"filesWanted"`
-	FilesUnwanted       []int64  `json:"filesUnwanted"`
-	PriorityHigh        []int64  `json:"priorityHigh"`
-	PriorityLow         []int64  `json:"priorityLow"`
-	PriorityNormal      []int64  `json:"priorityNormal"`
-	SeedIdleMode        *int64   `json:"seedIdleMode"`
-	SeedIdleLimit       *int64   `json:"seedIdleLimit"`
+	Location            *string   `json:"location"`
+	Move                *bool     `json:"move"`
+	SequentialDownload  *bool     `json:"sequentialDownload"`
+	Groups              *[]string `json:"groups"`
+	Labels              []string  `json:"labels"`
+	BandwidthPriority   *int64    `json:"bandwidthPriority"`
+	TrackerList         []string  `json:"trackerList"`
+	DownloadLimit       *int64    `json:"downloadLimit"`
+	DownloadLimited     *bool     `json:"downloadLimited"`
+	UploadLimit         *int64    `json:"uploadLimit"`
+	UploadLimited       *bool     `json:"uploadLimited"`
+	HonorsSessionLimits *bool     `json:"honorsSessionLimits"`
+	PeerLimit           *int64    `json:"peerLimit"`
+	SeedRatioLimit      *float64  `json:"seedRatioLimit"`
+	SeedRatioMode       *int64    `json:"seedRatioMode"`
+	QueuePosition       *int64    `json:"queuePosition"`
+	FilesWanted         []int64   `json:"filesWanted"`
+	FilesUnwanted       []int64   `json:"filesUnwanted"`
+	PriorityHigh        []int64   `json:"priorityHigh"`
+	PriorityLow         []int64   `json:"priorityLow"`
+	PriorityNormal      []int64   `json:"priorityNormal"`
+	SeedIdleMode        *int64    `json:"seedIdleMode"`
+	SeedIdleLimit       *int64    `json:"seedIdleLimit"`
 }
 
 // buildTorrentSetPayload 将请求体转换为 torrent-set 负载
@@ -470,10 +499,23 @@ func (h *Handler) applyRawFields(ctx context.Context, ids []int64, body *torrent
 	if body.SequentialDownload != nil {
 		raw["sequentialDownload"] = *body.SequentialDownload
 	}
+	if body.Groups != nil {
+		raw["groups"] = *body.Groups
+	}
 	if len(raw) == 0 {
 		return nil
 	}
-	return h.rpc.Client().SetTorrentRawFields(ctx, ids, raw)
+	err := h.rpc.Client().SetTorrentRawFields(ctx, ids, raw)
+	if err != nil {
+		// 带宽组 / 顺序下载为 Transmission 4.x 字段，旧版本不识别：告警降级而非整体失败
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "unrecognized") || strings.Contains(msg, "unknown key") {
+			slog.Warn("Transmission 不支持的种子字段已跳过", "err", err)
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // updateTorrent 修改单个种子属性（路径/标签/优先级/Tracker/限速等）
@@ -486,6 +528,10 @@ func (h *Handler) updateTorrent(c *gin.Context) {
 	var body torrentUpdateBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
+		return
+	}
+	if !validSeedIdleLimit(body.SeedIdleLimit) {
+		respondError(c, http.StatusBadRequest, "做种空闲上限超出合理范围（0-1000000 分钟）")
 		return
 	}
 	// 若同时提供 location 且未单独走 move 接口，则移动位置
@@ -523,6 +569,10 @@ func (h *Handler) updateTorrents(c *gin.Context) {
 	}
 	if len(body.IDs) == 0 {
 		respondError(c, http.StatusBadRequest, "缺少 ids")
+		return
+	}
+	if !validSeedIdleLimit(body.SeedIdleLimit) {
+		respondError(c, http.StatusBadRequest, "做种空闲上限超出合理范围（0-1000000 分钟）")
 		return
 	}
 	if body.Location != nil {

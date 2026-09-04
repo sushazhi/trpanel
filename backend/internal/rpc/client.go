@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -25,8 +26,8 @@ type Client struct {
 	sessionMu  sync.Mutex   // 保护 sessionID 的并发读写
 	sessionID  string       // raw RPC 使用的会话 ID
 
-	listMu     sync.Mutex   // 保护列表缓存
-	listCache  []*Torrent   // 列表缓存（共享只读，调用方不得修改元素）
+	listMu     sync.Mutex // 保护列表缓存
+	listCache  []*Torrent // 列表缓存（共享只读，调用方不得修改元素）
 	listCached time.Time
 }
 
@@ -134,11 +135,37 @@ func (c *Client) getTorrents(ctx context.Context, force bool) ([]*Torrent, error
 		return nil, err
 	}
 	mapped := mapTorrents(torrents)
+	// 合并库未实现的字段（groups 带宽组）。失败不阻塞列表：字段属于增强信息
+	if raw, err := c.GetTorrentRawFields(ctx, nil); err == nil {
+		for _, t := range mapped {
+			if m, ok := raw[t.ID]; ok {
+				applyRawTorrent(t, m)
+			}
+		}
+	} else {
+		slog.Debug("合并带宽组字段失败", "err", err)
+	}
 	c.listMu.Lock()
 	c.listCache = mapped
 	c.listCached = time.Now()
 	c.listMu.Unlock()
 	return mapped, nil
+}
+
+// applyRawTorrent 将 raw RPC 取回的库外字段合并进 Torrent
+func applyRawTorrent(t *Torrent, m map[string]any) {
+	if v, ok := m["sequentialDownload"].(bool); ok {
+		t.SequentialDownload = v
+	}
+	if arr, ok := m["groups"].([]any); ok {
+		groups := make([]string, 0, len(arr))
+		for _, g := range arr {
+			if s, ok := g.(string); ok {
+				groups = append(groups, s)
+			}
+		}
+		t.Groups = groups
+	}
 }
 
 // GetTorrentDetail 获取单个种子详情（含文件/Peers/Trackers）
@@ -153,12 +180,10 @@ func (c *Client) GetTorrentDetail(ctx context.Context, id int64) (*Torrent, erro
 		return nil, fmt.Errorf("种子 %d 不存在", id)
 	}
 	t := mapTorrent(torrents[0], true)
-	// 合并库未实现的字段（sequentialDownload）
+	// 合并库未实现的字段（sequentialDownload / groups）
 	if raw, err := c.GetTorrentRawFields(ctx, []int64{id}); err == nil {
 		if m, ok := raw[id]; ok {
-			if v, ok := m["sequentialDownload"].(bool); ok {
-				t.SequentialDownload = v
-			}
+			applyRawTorrent(t, m)
 		}
 	}
 	// 合并块位图（pieces / pieceCount / pieceSize）

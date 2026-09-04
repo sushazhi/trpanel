@@ -62,12 +62,12 @@ func (s *Service) Run(ctx context.Context) {
 
 // PlanEntry 一条达标计划的对外只读快照（MCP 报告 / 预览接口用）
 type PlanEntry struct {
-	TorrentID   int64                       `json:"torrentId"`
-	TorrentName string                      `json:"torrentName"`
-	Hash        string                      `json:"hash"`
-	Site        string                      `json:"site"`
-	Rule        string                      `json:"rule"`
-	Action      string                      `json:"action"`
+	TorrentID   int64                        `json:"torrentId"`
+	TorrentName string                       `json:"torrentName"`
+	Hash        string                       `json:"hash"`
+	Site        string                       `json:"site"`
+	Rule        string                       `json:"rule"`
+	Action      string                       `json:"action"`
 	Reason      []state.SeedPolicyReasonPart `json:"reason"`
 }
 

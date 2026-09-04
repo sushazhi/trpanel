@@ -438,6 +438,9 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
 
   useEffect(() => {
     if (!torrent) return
+    // cancelled 竞态保护：快速切换种子时旧请求可能晚于新请求返回，
+    // 否则会把旧种子的文件勾选/优先级覆盖到新种子上，保存时写错对象
+    let cancelled = false
     setDetail(null)
     setGeoMap({})
     geoMapRef.current = {}
@@ -447,12 +450,20 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
     torrentApi
       .detail(torrent.id)
       .then((d) => {
+        if (cancelled) return
         setDetail(d)
         setWanted((d.fileStats ?? []).map((f) => f.wanted))
         setPriorities((d.fileStats ?? []).map((f) => f.priority))
       })
-      .catch(() => toast.error(t('common.loading')))
-      .finally(() => setLoading(false))
+      .catch(() => {
+        if (!cancelled) toast.error(t('common.loading'))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [torrent, t])
 
   // 批量查询 Peer 地理位置（按 IP 集合去重，避免 3s 轮询重复请求）
@@ -478,10 +489,16 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
   // 定时刷新 Peers / Trackers，保持详情实时
   useEffect(() => {
     if (!torrent) return
+    let cancelled = false
     const id = setInterval(() => {
-      torrentApi.detail(torrent.id).then(setDetail).catch(() => {})
+      torrentApi.detail(torrent.id)
+        .then((d) => { if (!cancelled) setDetail(d) })
+        .catch(() => {})
     }, 3000)
-    return () => clearInterval(id)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
   }, [torrent])
 
   const saveFiles = async () => {

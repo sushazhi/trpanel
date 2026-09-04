@@ -80,6 +80,9 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	// 仅信任本机回环代理（fnOS 网关/反向代理均从回环接入）：直连部署下
+	// 客户端伪造 X-Forwarded-For 即可污染审计日志中的客户端 IP
+	_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	r.Use(gin.Recovery(), middleware.Logger(), middleware.SecurityHeaders(plat), middleware.CORS(plat))
 
 	// GeoIP 服务（mmdb 文件缺失时自动降级为空查询）
@@ -101,6 +104,7 @@ func main() {
 	mcpCtl := &api.McpControl{}
 	mcpCtl.Enabled.Store(cfg.MCPEnabled)
 	mcpCtl.AllowDelete.Store(cfg.MCPAllowDelete)
+	mcpCtl.AllowDangerous.Store(cfg.MCPAllowDangerous)
 	if cfg.MCPToken != "" {
 		t := cfg.MCPToken
 		mcpCtl.Token.Store(&t)
@@ -115,7 +119,7 @@ func main() {
 	// MCP：把种子管理能力以工具形式暴露给 AI 客户端（streamable HTTP + 令牌鉴权）。
 	// 路由常驻注册，gate 在鉴权之前拦截关闭状态——按 404 处理，不暴露端点存在性；
 	// 接入令牌与 API_TOKEN 相互独立，仅作用于 /mcp，可在设置界面热更新
-	mcpHandler := mcpserver.New(manager, policySvc, store, plat, &mcpCtl.AllowDelete, hub.Bump).Handler()
+	mcpHandler := mcpserver.New(manager, policySvc, store, plat, &mcpCtl.AllowDelete, &mcpCtl.AllowDangerous, hub.Bump).Handler()
 	mcpGuards := []gin.HandlerFunc{func(c *gin.Context) {
 		if !mcpCtl.Enabled.Load() {
 			c.AbortWithStatus(http.StatusNotFound)
@@ -131,7 +135,8 @@ func main() {
 	r.Any(gatewayPrefix+"/mcp", append(mcpGuards, gin.WrapH(mcpHandler))...)
 	if cfg.MCPEnabled {
 		slog.Info("MCP 服务已启用", "endpoint", gatewayPrefix+"/mcp",
-			"tokenAuth", cfg.MCPToken != "", "allowDelete", cfg.MCPAllowDelete)
+			"tokenAuth", cfg.MCPToken != "", "allowDelete", cfg.MCPAllowDelete,
+			"allowDangerous", cfg.MCPAllowDangerous)
 	}
 	if cfg.MCPToken == "" && cfg.MCPEnabled {
 		slog.Warn("MCP 未启用令牌鉴权，任何可达本服务的客户端均可通过 MCP 工具控制 Transmission")
@@ -146,6 +151,9 @@ func main() {
 	srv := &http.Server{
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
+		// 只收紧 keep-alive 空闲连接；不设 ReadTimeout/WriteTimeout——
+		// WebSocket 升级 hijack 连接后，残留的读写 deadline 会掐断长连接
+		IdleTimeout: 120 * time.Second,
 	}
 	if socketPath != "" {
 		_ = os.Remove(socketPath)
@@ -202,7 +210,7 @@ func main() {
 		mcpRouter := gin.New()
 		mcpRouter.Use(gin.Recovery(), middleware.Logger())
 		mcpRouter.Any("/mcp", append(mcpGuards, gin.WrapH(mcpHandler))...)
-		mcpSrv = &http.Server{Handler: mcpRouter, ReadHeaderTimeout: 10 * time.Second}
+		mcpSrv = &http.Server{Handler: mcpRouter, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 		mcpAddr := net.JoinHostPort(cfg.Host, cfg.MCPPort)
 		mcpLn, err := net.Listen("tcp", mcpAddr)
 		if err != nil {

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"strings"
 
+	trpc "github.com/hekmon/transmissionrpc/v3"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/trpanel/backend/internal/models"
 	"github.com/trpanel/backend/internal/rpc"
@@ -48,6 +50,75 @@ func registerTools(srv *mcp.Server, s *Server) {
 		Name:        "remove_torrents",
 		Description: "按 ID 批量删除种子；deleteData=true 时同时删除本地文件（不可恢复）。需服务端显式开启",
 	}, s.removeTorrents)
+
+	// 只读：会话与诊断
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_free_space",
+		Description: "查询 Transmission 主机某目录的剩余空间与总容量；不传 path 时查询全局下载目录（添加种子前预判磁盘是否够用）",
+	}, s.getFreeSpace)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_session_config",
+		Description: "获取 Transmission 会话配置摘要：版本、下载目录、速度限制、队列、加密、端口与黑名单等",
+	}, s.getSessionConfig)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "test_port",
+		Description: "测试 Transmission 监听端口能否从外网访问（排查下载无连接）",
+	}, s.testPort)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_torrent_sites",
+		Description: "列出全部种子的站点归属：站点名到种子数汇总，以及每个种子对应的站点列表",
+	}, s.getTorrentSites)
+
+	// 写操作（默认开放）
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "verify_torrents",
+		Description: "按 ID 批量触发本地数据校验（排查下载卡住 / 数据损坏）",
+	}, s.verifyTorrents)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "reannounce_torrents",
+		Description: "按 ID 批量向 Tracker 重新宣告（排查 Tracker 连接失败）",
+	}, s.reannounceTorrents)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "set_torrent_labels",
+		Description: "按 ID 批量设置种子标签（整体覆盖现有标签）",
+	}, s.setTorrentLabels)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "set_torrent_limits",
+		Description: "按 ID 批量设置种子限速：上传 / 下载上限（KB/s）及是否启用、是否遵循全局限速",
+	}, s.setTorrentLimits)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "queue_move",
+		Description: "按 ID 批量调整队列顺序：top / up / down / bottom",
+	}, s.queueMove)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "update_blocklist",
+		Description: "更新黑名单规则（需 Transmission 已启用黑名单），返回规则数",
+	}, s.updateBlocklist)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "set_session_config",
+		Description: "修改 Transmission 会话设置：下载目录（仅影响之后新添加的种子）、限速（全局 / 备用含定时）、队列、网络（端口 / 加密 / DHT / PEX 等）、做种策略默认值、黑名单、磁盘缓存等；未提供的字段保持不变",
+	}, s.setSessionConfig)
+
+	// 高危操作（需服务端显式开启「允许通过 MCP 执行高危操作」）
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "move_torrents",
+		Description: "按 ID 批量移动种子数据到新目录（可实际搬移本地文件，影响较大）。需服务端显式开启",
+	}, s.moveTorrents)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "rename_file",
+		Description: "重命名种子内的文件或目录（影响做种完整性，慎用）。需服务端显式开启",
+	}, s.renameFile)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "execute_seed_policy",
+		Description: "立即执行一轮做种策略：对已达标种子按规则暂停或删除（含删数据）。需服务端显式开启",
+	}, s.executeSeedPolicy)
+
+	// 通用透传：Transmission 官方 RPC 方法白名单。
+	// 只读方法直接可用；写方法受「允许通过 MCP 执行高危操作」管控；敏感方法（关停会话 / 宿主机脚本）一律屏蔽
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "transmission_api_request",
+		Description: "Transmission RPC 通用透传：直接调用官方 RPC 白名单方法（含客户端库未封装的能力），返回原始 arguments。只读方法（torrent-get / session-get 等）直接可用；写方法（torrent-set / torrent-add / session-set 等）需服务端开启「允许通过 MCP 执行高危操作」；关停会话与脚本类配置永久屏蔽",
+	}, s.transmissionAPIRequest)
 }
 
 // emptyIn 无入参工具的占位
@@ -355,4 +426,534 @@ func (s *Server) removeTorrents(ctx context.Context, _ *mcp.CallToolRequest, in 
 	s.bump()
 	slog.Info("MCP 删除种子", "ids", in.IDs, "deleteData", in.DeleteData)
 	return nil, map[string]any{"ids": in.IDs, "deleted": true, "deleteData": in.DeleteData}, nil
+}
+
+// ---- get_free_space ----
+
+type getFreeSpaceIn struct {
+	Path string `json:"path,omitempty" jsonschema:"要查询的目录；留空使用全局下载目录"`
+}
+
+func (s *Server) getFreeSpace(ctx context.Context, _ *mcp.CallToolRequest, in getFreeSpaceIn) (*mcp.CallToolResult, any, error) {
+	path := strings.TrimSpace(in.Path)
+	if path == "" {
+		sess, err := s.manager.Client().GetSession(ctx)
+		if err != nil {
+			return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+		}
+		if sess.DownloadDir == "" {
+			return nil, nil, errors.New("未提供 path，且全局下载目录为空")
+		}
+		path = sess.DownloadDir
+	}
+	free, total, err := s.manager.Client().GetFreeSpace(ctx, path)
+	if err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	return nil, map[string]any{"path": path, "freeSpace": free, "totalSize": total}, nil
+}
+
+// ---- get_session_config ----
+
+func (s *Server) getSessionConfig(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
+	sess, err := s.manager.Client().GetSession(ctx)
+	if err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	return nil, map[string]any{
+		"version":               sess.Version,
+		"downloadDir":           sess.DownloadDir,
+		"incompleteDir":         sess.IncompleteDir,
+		"incompleteDirEnabled":  sess.IncompleteDirEnabled,
+		"speedLimitUp":          sess.SpeedLimitUp,
+		"speedLimitUpOn":        sess.SpeedLimitUpOn,
+		"speedLimitDown":        sess.SpeedLimitDown,
+		"speedLimitDownOn":      sess.SpeedLimitDownOn,
+		"altSpeedUp":            sess.AltSpeedUp,
+		"altSpeedDown":          sess.AltSpeedDown,
+		"altSpeedEnabled":       sess.AltSpeedEnabled,
+		"peerLimitGlobal":       sess.PeerLimitGlobal,
+		"peerPort":              sess.PeerPort,
+		"portForwardingEnabled": sess.PortForwardingEnabled,
+		"encryption":            sess.Encryption,
+		"downloadQueueEnabled":  sess.DownloadQueueEnabled,
+		"downloadQueueSize":     sess.DownloadQueueSize,
+		"seedQueueEnabled":      sess.SeedQueueEnabled,
+		"seedQueueSize":         sess.SeedQueueSize,
+		"blocklistEnabled":      sess.BlocklistEnabled,
+		"blocklistURL":          sess.BlocklistURL,
+		"blocklistSize":         sess.BlocklistSize,
+		"startAdded":            sess.StartAdded,
+	}, nil
+}
+
+// ---- test_port ----
+
+func (s *Server) testPort(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
+	open, err := s.manager.Client().TestPort(ctx)
+	if err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	return nil, map[string]any{"open": open}, nil
+}
+
+// ---- get_torrent_sites ----
+
+func (s *Server) getTorrentSites(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
+	m, err := s.manager.Client().GetTorrentSites(ctx)
+	if err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	counts := map[string]int{}
+	byTorrent := make(map[int64][]string, len(m))
+	for id, sites := range m {
+		byTorrent[id] = sites
+		for _, site := range sites {
+			counts[site]++
+		}
+	}
+	return nil, map[string]any{"counts": counts, "byTorrent": byTorrent}, nil
+}
+
+// ---- verify / reannounce ----
+
+func (s *Server) verifyTorrents(ctx context.Context, _ *mcp.CallToolRequest, in idsIn) (*mcp.CallToolResult, any, error) {
+	if len(in.IDs) == 0 {
+		return nil, nil, errors.New("缺少 ids")
+	}
+	if err := s.manager.Client().VerifyTorrents(ctx, in.IDs); err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	s.bump()
+	return nil, map[string]any{"ids": in.IDs, "action": "verify"}, nil
+}
+
+func (s *Server) reannounceTorrents(ctx context.Context, _ *mcp.CallToolRequest, in idsIn) (*mcp.CallToolResult, any, error) {
+	if len(in.IDs) == 0 {
+		return nil, nil, errors.New("缺少 ids")
+	}
+	if err := s.manager.Client().ReannounceTorrents(ctx, in.IDs); err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	return nil, map[string]any{"ids": in.IDs, "action": "reannounce"}, nil
+}
+
+// ---- set_torrent_labels ----
+
+type setLabelsIn struct {
+	IDs    []int64  `json:"ids" jsonschema:"种子 ID 列表（来自 list_torrents）"`
+	Labels []string `json:"labels" jsonschema:"标签列表（整体覆盖现有标签；传空数组即清空）"`
+}
+
+func (s *Server) setTorrentLabels(ctx context.Context, _ *mcp.CallToolRequest, in setLabelsIn) (*mcp.CallToolResult, any, error) {
+	if len(in.IDs) == 0 {
+		return nil, nil, errors.New("缺少 ids")
+	}
+	if err := s.manager.Client().SetTorrent(ctx, in.IDs, trpc.TorrentSetPayload{Labels: in.Labels}); err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	s.bump()
+	return nil, map[string]any{"ids": in.IDs, "labels": in.Labels}, nil
+}
+
+// ---- set_torrent_limits ----
+
+type setLimitsIn struct {
+	IDs                 []int64 `json:"ids" jsonschema:"种子 ID 列表（来自 list_torrents）"`
+	UploadLimit         *int64  `json:"uploadLimit,omitempty" jsonschema:"上传速度上限（KB/s）"`
+	DownloadLimit       *int64  `json:"downloadLimit,omitempty" jsonschema:"下载速度上限（KB/s）"`
+	UploadLimited       *bool   `json:"uploadLimited,omitempty" jsonschema:"是否启用上传限速"`
+	DownloadLimited     *bool   `json:"downloadLimited,omitempty" jsonschema:"是否启用下载限速"`
+	HonorsSessionLimits *bool   `json:"honorsSessionLimits,omitempty" jsonschema:"是否遵循全局速度限制"`
+}
+
+func (s *Server) setTorrentLimits(ctx context.Context, _ *mcp.CallToolRequest, in setLimitsIn) (*mcp.CallToolResult, any, error) {
+	if len(in.IDs) == 0 {
+		return nil, nil, errors.New("缺少 ids")
+	}
+	if in.UploadLimit == nil && in.DownloadLimit == nil && in.UploadLimited == nil &&
+		in.DownloadLimited == nil && in.HonorsSessionLimits == nil {
+		return nil, nil, errors.New("至少提供一项要修改的限速字段")
+	}
+	payload := trpc.TorrentSetPayload{
+		UploadLimit:         in.UploadLimit,
+		DownloadLimit:       in.DownloadLimit,
+		UploadLimited:       in.UploadLimited,
+		DownloadLimited:     in.DownloadLimited,
+		HonorsSessionLimits: in.HonorsSessionLimits,
+	}
+	if err := s.manager.Client().SetTorrent(ctx, in.IDs, payload); err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	s.bump()
+	return nil, map[string]any{"ids": in.IDs, "action": "set-limits"}, nil
+}
+
+// ---- queue_move ----
+
+type queueMoveIn struct {
+	IDs       []int64 `json:"ids" jsonschema:"种子 ID 列表（来自 list_torrents）"`
+	Direction string  `json:"direction" jsonschema:"移动方向：top / up / down / bottom"`
+}
+
+func (s *Server) queueMove(ctx context.Context, _ *mcp.CallToolRequest, in queueMoveIn) (*mcp.CallToolResult, any, error) {
+	if len(in.IDs) == 0 {
+		return nil, nil, errors.New("缺少 ids")
+	}
+	dir := strings.ToLower(strings.TrimSpace(in.Direction))
+	switch dir {
+	case "top", "up", "down", "bottom":
+	default:
+		return nil, nil, fmt.Errorf("direction 无效: %q，可选 top/up/down/bottom", in.Direction)
+	}
+	if err := s.manager.Client().QueueMove(ctx, in.IDs, dir); err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	s.bump()
+	return nil, map[string]any{"ids": in.IDs, "direction": dir}, nil
+}
+
+// ---- update_blocklist ----
+
+func (s *Server) updateBlocklist(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
+	n, err := s.manager.Client().UpdateBlocklist(ctx)
+	if err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	return nil, map[string]any{"ruleCount": n}, nil
+}
+
+// ---- set_session_config ----
+
+// setSessionIn 覆盖 session-set 的常用可写项（刻意排除只读字段与脚本类字段）。
+// 全部可选，未提供的字段不会下发，保持 Transmission 现值不变
+type setSessionIn struct {
+	// 下载目录与新增行为
+	DownloadDir          string `json:"downloadDir,omitempty" jsonschema:"全局下载目录（仅影响之后新添加的种子；已有种子移动目录请用 move_torrents）"`
+	IncompleteDir        string `json:"incompleteDir,omitempty" jsonschema:"未完成任务临时目录（需 incompleteDirEnabled=true 才生效）"`
+	IncompleteDirEnabled *bool  `json:"incompleteDirEnabled,omitempty" jsonschema:"是否启用未完成临时目录"`
+	RenamePartialFiles   *bool  `json:"renamePartialFiles,omitempty" jsonschema:"未完成的文件是否追加 .part 后缀"`
+	StartAdded           *bool  `json:"startAdded,omitempty" jsonschema:"新种子添加后是否自动开始"`
+	TrashOriginalTorrent *bool  `json:"trashOriginalTorrent,omitempty" jsonschema:"添加后是否删除原始 .torrent 文件"`
+	// 限速（KB/s）：全局与备用（乌龟模式）
+	SpeedLimitUp        *int64 `json:"speedLimitUp,omitempty" jsonschema:"全局上传限速（KB/s），需 speedLimitUpOn=true 生效"`
+	SpeedLimitUpOn      *bool  `json:"speedLimitUpOn,omitempty" jsonschema:"是否启用全局上传限速"`
+	SpeedLimitDown      *int64 `json:"speedLimitDown,omitempty" jsonschema:"全局下载限速（KB/s），需 speedLimitDownOn=true 生效"`
+	SpeedLimitDownOn    *bool  `json:"speedLimitDownOn,omitempty" jsonschema:"是否启用全局下载限速"`
+	AltSpeedUp          *int64 `json:"altSpeedUp,omitempty" jsonschema:"备用限速上传（KB/s）"`
+	AltSpeedDown        *int64 `json:"altSpeedDown,omitempty" jsonschema:"备用限速下载（KB/s）"`
+	AltSpeedEnabled     *bool  `json:"altSpeedEnabled,omitempty" jsonschema:"是否启用备用限速（乌龟模式）"`
+	AltSpeedTimeEnabled *bool  `json:"altSpeedTimeEnabled,omitempty" jsonschema:"是否按时间段自动切换备用限速"`
+	AltSpeedTimeBegin   *int64 `json:"altSpeedTimeBegin,omitempty" jsonschema:"备用限速开始时间（午夜起分钟数 0-1439）"`
+	AltSpeedTimeEnd     *int64 `json:"altSpeedTimeEnd,omitempty" jsonschema:"备用限速结束时间（午夜起分钟数 0-1439）"`
+	AltSpeedTimeDay     *int64 `json:"altSpeedTimeDay,omitempty" jsonschema:"备用限速生效日（位掩码，全部为 127）"`
+	// 队列
+	DownloadQueueEnabled *bool  `json:"downloadQueueEnabled,omitempty" jsonschema:"是否限制同时下载数"`
+	DownloadQueueSize    *int64 `json:"downloadQueueSize,omitempty" jsonschema:"最大同时下载数"`
+	SeedQueueEnabled     *bool  `json:"seedQueueEnabled,omitempty" jsonschema:"是否限制同时做种数"`
+	SeedQueueSize        *int64 `json:"seedQueueSize,omitempty" jsonschema:"最大同时做种数"`
+	QueueStalledEnabled  *bool  `json:"queueStalledEnabled,omitempty" jsonschema:"是否把长时间无流量的种子视为停滞（不计入队列）"`
+	QueueStalledMinutes  *int64 `json:"queueStalledMinutes,omitempty" jsonschema:"判定停滞的空闲分钟数"`
+	// 网络与隐私
+	PeerLimitGlobal       *int64 `json:"peerLimitGlobal,omitempty" jsonschema:"全局最大 Peer 数"`
+	PeerLimitPerTorrent   *int64 `json:"peerLimitPerTorrent,omitempty" jsonschema:"单个种子最大 Peer 数"`
+	PeerPort              *int64 `json:"peerPort,omitempty" jsonschema:"Peer 监听端口（1-65535）"`
+	PeerPortRandomOnStart *bool  `json:"peerPortRandomOnStart,omitempty" jsonschema:"启动时是否随机选择端口"`
+	PortForwardingEnabled *bool  `json:"portForwardingEnabled,omitempty" jsonschema:"是否启用 UPnP / NAT-PMP 端口转发"`
+	PEXEnabled            *bool  `json:"pexEnabled,omitempty" jsonschema:"是否启用 PEX（私有种子无效）"`
+	DHTEnabled            *bool  `json:"dhtEnabled,omitempty" jsonschema:"是否启用 DHT（私有种子无效）"`
+	LPDEnabled            *bool  `json:"lpdEnabled,omitempty" jsonschema:"是否启用本地 Peer 发现（私有种子无效）"`
+	UTPEnabled            *bool  `json:"utpEnabled,omitempty" jsonschema:"是否启用 uTP"`
+	Encryption            string `json:"encryption,omitempty" jsonschema:"加密策略：required / preferred / tolerated"`
+	// 做种策略默认值
+	SeedRatioLimit          *float64 `json:"seedRatioLimit,omitempty" jsonschema:"全局做种分享率上限，需 seedRatioLimited=true 生效"`
+	SeedRatioLimited        *bool    `json:"seedRatioLimited,omitempty" jsonschema:"是否启用全局做种分享率上限"`
+	IdleSeedingLimit        *int64   `json:"idleSeedingLimit,omitempty" jsonschema:"做种空闲多少分钟后自动停止，需 idleSeedingLimitEnabled=true 生效"`
+	IdleSeedingLimitEnabled *bool    `json:"idleSeedingLimitEnabled,omitempty" jsonschema:"是否启用做种空闲停止"`
+	// 黑名单与性能
+	BlocklistEnabled *bool  `json:"blocklistEnabled,omitempty" jsonschema:"是否启用黑名单"`
+	BlocklistURL     string `json:"blocklistURL,omitempty" jsonschema:"黑名单规则文件地址"`
+	CacheSizeMB      *int64 `json:"cacheSizeMB,omitempty" jsonschema:"磁盘缓存大小（MB）"`
+}
+
+func (s *Server) setSessionConfig(ctx context.Context, _ *mcp.CallToolRequest, in setSessionIn) (*mcp.CallToolResult, any, error) {
+	payload := trpc.SessionArguments{
+		DownloadDir:               optStr(in.DownloadDir),
+		IncompleteDir:             optStr(in.IncompleteDir),
+		IncompleteDirEnabled:      in.IncompleteDirEnabled,
+		RenamePartialFiles:        in.RenamePartialFiles,
+		StartAddedTorrents:        in.StartAdded,
+		TrashOriginalTorrentFiles: in.TrashOriginalTorrent,
+		SpeedLimitUp:              in.SpeedLimitUp,
+		SpeedLimitUpEnabled:       in.SpeedLimitUpOn,
+		SpeedLimitDown:            in.SpeedLimitDown,
+		SpeedLimitDownEnabled:     in.SpeedLimitDownOn,
+		AltSpeedUp:                in.AltSpeedUp,
+		AltSpeedDown:              in.AltSpeedDown,
+		AltSpeedEnabled:           in.AltSpeedEnabled,
+		AltSpeedTimeEnabled:       in.AltSpeedTimeEnabled,
+		AltSpeedTimeBegin:         in.AltSpeedTimeBegin,
+		AltSpeedTimeEnd:           in.AltSpeedTimeEnd,
+		AltSpeedTimeDay:           in.AltSpeedTimeDay,
+		DownloadQueueEnabled:      in.DownloadQueueEnabled,
+		DownloadQueueSize:         in.DownloadQueueSize,
+		SeedQueueEnabled:          in.SeedQueueEnabled,
+		SeedQueueSize:             in.SeedQueueSize,
+		QueueStalledEnabled:       in.QueueStalledEnabled,
+		QueueStalledMinutes:       in.QueueStalledMinutes,
+		PeerLimitGlobal:           in.PeerLimitGlobal,
+		PeerLimitPerTorrent:       in.PeerLimitPerTorrent,
+		PeerPort:                  in.PeerPort,
+		PeerPortRandomOnStart:     in.PeerPortRandomOnStart,
+		PortForwardingEnabled:     in.PortForwardingEnabled,
+		PEXEnabled:                in.PEXEnabled,
+		DHTEnabled:                in.DHTEnabled,
+		LPDEnabled:                in.LPDEnabled,
+		UTPEnabled:                in.UTPEnabled,
+		SeedRatioLimit:            in.SeedRatioLimit,
+		SeedRatioLimited:          in.SeedRatioLimited,
+		IdleSeedingLimit:          in.IdleSeedingLimit,
+		IdleSeedingLimitEnabled:   in.IdleSeedingLimitEnabled,
+		BlocklistEnabled:          in.BlocklistEnabled,
+		BlocklistURL:              optStr(in.BlocklistURL),
+		CacheSizeMB:               in.CacheSizeMB,
+	}
+	if in.Encryption != "" {
+		switch enc := trpc.Encryption(strings.ToLower(strings.TrimSpace(in.Encryption))); enc {
+		case trpc.EncryptionRequired, trpc.EncryptionPreferred, trpc.EncryptionTolerated:
+			payload.Encryption = &enc
+		default:
+			return nil, nil, fmt.Errorf("encryption 无效: %q，可选 required/preferred/tolerated", in.Encryption)
+		}
+	}
+	if in.PeerPort != nil && (*in.PeerPort < 1 || *in.PeerPort > 65535) {
+		return nil, nil, errors.New("peerPort 必须在 1-65535 之间")
+	}
+	if !anyFieldSet(in) {
+		return nil, nil, errors.New("至少提供一项要修改的配置")
+	}
+	if err := s.manager.Client().SetSession(ctx, payload); err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	s.bump()
+	return nil, map[string]any{"updated": true}, nil
+}
+
+// optStr 空串转 nil，避免空值覆盖 Transmission 现有配置
+func optStr(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+// anyFieldSet 入参里是否有任一字段提供了非零值（指针非 nil / 字符串非空）。
+// SessionArguments 含切片字段不可用 == 比较，故用反射实现
+func anyFieldSet(v any) bool {
+	rv := reflect.ValueOf(v)
+	for i := 0; i < rv.NumField(); i++ {
+		f := rv.Field(i)
+		switch f.Kind() {
+		case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func, reflect.Interface:
+			if !f.IsNil() {
+				return true
+			}
+		default:
+			if !f.IsZero() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ---- 高危操作（需 allowDangerous）----
+
+// requireDangerous 校验高危操作开关；返回空串表示放行
+func (s *Server) requireDangerous() error {
+	if !s.allowDangerous.Load() {
+		return errors.New("高危操作未开放：需在本产品的设置界面开启「允许通过 MCP 执行高危操作」")
+	}
+	return nil
+}
+
+type moveTorrentsIn struct {
+	IDs      []int64 `json:"ids" jsonschema:"种子 ID 列表（来自 list_torrents）"`
+	Location string  `json:"location" jsonschema:"目标目录（Transmission 主机上的绝对路径）"`
+	Move     *bool   `json:"move,omitempty" jsonschema:"true 时把本地文件搬移到新目录（默认 true）；false 仅更新种子记录的路径"`
+}
+
+func (s *Server) moveTorrents(ctx context.Context, _ *mcp.CallToolRequest, in moveTorrentsIn) (*mcp.CallToolResult, any, error) {
+	if err := s.requireDangerous(); err != nil {
+		return nil, nil, err
+	}
+	if len(in.IDs) == 0 {
+		return nil, nil, errors.New("缺少 ids")
+	}
+	if strings.TrimSpace(in.Location) == "" {
+		return nil, nil, errors.New("缺少 location")
+	}
+	move := true
+	if in.Move != nil {
+		move = *in.Move
+	}
+	failed := make([]int64, 0)
+	for _, id := range in.IDs {
+		if err := s.manager.Client().SetTorrentLocation(ctx, id, in.Location, move); err != nil {
+			slog.Warn("MCP 移动种子失败", "id", id, "err", err)
+			failed = append(failed, id)
+		}
+	}
+	s.bump()
+	slog.Info("MCP 移动种子", "ids", in.IDs, "location", in.Location, "move", move, "failed", failed)
+	out := map[string]any{"ids": in.IDs, "location": in.Location, "move": move, "failed": failed}
+	if len(failed) > 0 {
+		out["note"] = "部分种子移动失败，见 failed 列表"
+	}
+	return nil, out, nil
+}
+
+type renameFileIn struct {
+	ID   int64  `json:"id" jsonschema:"种子 ID（list_torrents 返回的 id）"`
+	Path string `json:"path" jsonschema:"要重命名的文件 / 目录在种子内的相对路径；空串表示重命名整个种子根目录"`
+	Name string `json:"name" jsonschema:"新的名称（不含路径分隔符）"`
+}
+
+func (s *Server) renameFile(ctx context.Context, _ *mcp.CallToolRequest, in renameFileIn) (*mcp.CallToolResult, any, error) {
+	if err := s.requireDangerous(); err != nil {
+		return nil, nil, err
+	}
+	if strings.TrimSpace(in.Name) == "" || strings.ContainsAny(in.Name, "/\\") {
+		return nil, nil, errors.New("name 不能为空且不能包含路径分隔符")
+	}
+	if err := s.manager.Client().RenameFile(ctx, in.ID, in.Path, in.Name); err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	s.bump()
+	slog.Info("MCP 重命名种子文件", "id", in.ID, "path", in.Path, "name", in.Name)
+	return nil, map[string]any{"id": in.ID, "path": in.Path, "name": in.Name}, nil
+}
+
+func (s *Server) executeSeedPolicy(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
+	if err := s.requireDangerous(); err != nil {
+		return nil, nil, err
+	}
+	enforced := s.store.Get().SeedPolicyGuard.Enforce
+	result, err := s.policy.Tick(ctx)
+	if err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	slog.Info("MCP 执行做种策略", "enforced", enforced, "result", result)
+	out := map[string]any{"enforced": enforced, "result": result}
+	if !enforced {
+		out["note"] = "做种策略保护栏未开启，本轮仅评估并刷新待办清单，未执行任何动作"
+	} else if result.Deleted > 0 {
+		out["note"] = "本轮已按规则删除种子（含按规则配置的删数据），详情见执行记录"
+	}
+	return nil, out, nil
+}
+
+// ---- transmission_api_request（通用透传）----
+
+// transmissionReadMethods Transmission 官方 RPC 中的只读方法：免开关直接可用
+var transmissionReadMethods = map[string]bool{
+	"torrent-get":   true,
+	"session-get":   true,
+	"session-stats": true,
+	"free-space":    true,
+	"port-test":     true,
+	"group-get":     true,
+}
+
+// transmissionWriteMethods Transmission 官方 RPC 中的写方法：需 allowDangerous 高危开关
+var transmissionWriteMethods = map[string]bool{
+	"torrent-add":          true,
+	"torrent-set":          true,
+	"torrent-start":        true,
+	"torrent-start-now":    true,
+	"torrent-stop":         true,
+	"torrent-remove":       true,
+	"torrent-reannounce":   true,
+	"torrent-verify":       true,
+	"torrent-set-location": true,
+	"torrent-rename-path":  true,
+	"session-set":          true,
+	"group-set":            true,
+	"blocklist-update":     true,
+	"queue-move-top":       true,
+	"queue-move-up":        true,
+	"queue-move-down":      true,
+	"queue-move-bottom":    true,
+}
+
+// sessionSetBlockedKeys session-set 中可在 Transmission 宿主机执行任意命令的脚本类键，透传时屏蔽
+var sessionSetBlockedKeys = map[string]bool{
+	"script-torrent-added-filename":        true,
+	"script-torrent-done-filename":         true,
+	"script-torrent-done-seeding-filename": true,
+}
+
+type apiRequestIn struct {
+	Method string         `json:"method" jsonschema:"Transmission RPC 方法名（官方白名单），如 torrent-get / session-get / torrent-set / queue-move-top"`
+	Args   map[string]any `json:"args,omitempty" jsonschema:"RPC arguments 对象，键使用 Transmission 官方下划线命名（如 ids / fields / download-dir）；留空表示无参数"`
+}
+
+func (s *Server) transmissionAPIRequest(ctx context.Context, _ *mcp.CallToolRequest, in apiRequestIn) (*mcp.CallToolResult, any, error) {
+	method := strings.ToLower(strings.TrimSpace(in.Method))
+	switch {
+	case method == "":
+		return nil, nil, errors.New("缺少 method")
+	case method == "session-close":
+		return nil, nil, errors.New("session-close 属敏感操作（关停 Transmission 会话），已永久屏蔽")
+	case transmissionReadMethods[method]:
+		// 只读放行
+	case transmissionWriteMethods[method]:
+		if err := s.requireDangerous(); err != nil {
+			return nil, nil, err
+		}
+		if method == "session-set" {
+			for k := range in.Args {
+				if sessionSetBlockedKeys[strings.ToLower(k)] {
+					return nil, nil, fmt.Errorf("session-set 的 %q 属敏感配置（可在宿主机执行脚本），已屏蔽", k)
+				}
+			}
+		}
+	default:
+		return nil, nil, fmt.Errorf("不支持的 RPC 方法: %q（仅允许官方白名单方法，详见工具描述）", in.Method)
+	}
+	args := in.Args
+	if args == nil {
+		args = map[string]any{}
+	}
+	out, err := s.manager.Client().RawCall(ctx, method, args)
+	if err != nil {
+		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
+	}
+	if !transmissionReadMethods[method] {
+		slog.Info("MCP 透传 RPC 写操作", "method", method, "args", args)
+		s.bump()
+	}
+	return nil, map[string]any{"method": method, "result": sanitizeRPCResult(out)}, nil
+}
+
+// sanitizeRPCResult 递归裁剪对 AI 决策无意义的大字段（torrent-get 的 pieces 为 base64 块位图）
+func sanitizeRPCResult(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			if k == "pieces" {
+				t[k] = "<base64 块位图已省略>"
+				continue
+			}
+			t[k] = sanitizeRPCResult(val)
+		}
+		return t
+	case []any:
+		for i, item := range t {
+			t[i] = sanitizeRPCResult(item)
+		}
+		return t
+	default:
+		return v
+	}
 }
