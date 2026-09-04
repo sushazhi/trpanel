@@ -14,6 +14,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
 [![Release](https://img.shields.io/badge/release-v0.1.0-blue?style=flat-square)](../../releases)
 [![Docker](https://img.shields.io/badge/GHCR-trpanel-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/sushazhi/trpanel/pkgs/container/trpanel)
+[![在线预览](https://img.shields.io/badge/在线预览-Demo-8A2BE2?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyQTEwIDEwIDAgMSAwIDIyIDEyIDEwIDEwIDAgMCAwIDEyIDJ6bTAgMmE4IDggMCAxIDEgOCA4IDggOCAwIDEgLTggOHptLTEtMTJ2NGw0LTQtNC00eiIvPjwvc3ZnPg==)](https://sushazhi.github.io/trpanel/)
 
 </div>
 
@@ -43,6 +44,17 @@
 ---
 
 ## 📸 预览
+
+### 🌐 在线体验
+
+无需安装，打开即用，数据在浏览器内模拟生成、可完整交互：
+
+| | 地址 | 说明 |
+|:--|:--|:--|
+| 🖥️ | **[电脑版预览](https://sushazhi.github.io/trpanel/)** | 桌面布局：虚拟滚动表格、右键菜单、拖拽排序 |
+| 📱 | **[移动版预览](https://sushazhi.github.io/trpanel/mobile.html)** | 手机壳样式的移动版预览；真机打开自动进入应用本体 |
+
+> 演示模式为纯前端构建（`pnpm build:demo`），不连接任何后端；推送到 `master` 自动部署（[工作流](.github/workflows/demo-pages.yml)）。首次启用需在仓库 **Settings → Pages** 将 Source 设为 **GitHub Actions**。
 
 <table align="center">
   <tr>

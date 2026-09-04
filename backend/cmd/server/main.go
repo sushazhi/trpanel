@@ -191,6 +191,35 @@ func main() {
 		slog.Info("服务已启动", "addr", srv.Addr)
 	}
 
+	// MCP 专用直连端口：socket 部署下服务不监听 TCP，外部 AI 客户端又无法经宿主网关
+	// 访问 /mcp；该端口单独暴露 MCP 端点（复用同一套开关与令牌守卫），不扩大界面 API 的暴露面
+	var mcpSrv *http.Server
+	if cfg.MCPPort != "" && cfg.MCPPort != "0" {
+		if port, err := strconv.Atoi(cfg.MCPPort); err != nil || port < 1 || port > 65535 {
+			slog.Error("MCP_PORT 非法：必须是 1-65535 的端口号", "value", cfg.MCPPort)
+			os.Exit(1)
+		}
+		mcpRouter := gin.New()
+		mcpRouter.Use(gin.Recovery(), middleware.Logger())
+		mcpRouter.Any("/mcp", append(mcpGuards, gin.WrapH(mcpHandler))...)
+		mcpSrv = &http.Server{Handler: mcpRouter, ReadHeaderTimeout: 10 * time.Second}
+		mcpAddr := net.JoinHostPort(cfg.Host, cfg.MCPPort)
+		mcpLn, err := net.Listen("tcp", mcpAddr)
+		if err != nil {
+			slog.Error("MCP 端口监听失败", "addr", mcpAddr, "err", err)
+			os.Exit(1)
+		}
+		go func() {
+			if err := mcpSrv.Serve(mcpLn); err != nil && err != http.ErrServerClosed {
+				slog.Error("MCP 直连服务启动失败", "err", err)
+			}
+		}()
+		slog.Info("MCP 直连端口已开启", "addr", mcpLn.Addr().String())
+		if mcpCtl.Token.Load() == nil {
+			slog.Warn("MCP 直连端口未启用令牌鉴权，任何可达该端口的客户端均可通过 MCP 工具控制 Transmission")
+		}
+	}
+
 	// 优雅退出
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -201,6 +230,9 @@ func main() {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	_ = srv.Shutdown(shutdownCtx)
+	if mcpSrv != nil {
+		_ = mcpSrv.Shutdown(shutdownCtx)
+	}
 }
 
 // gatewayPrefixRe 网关前缀白名单：以 / 开头的纯路径段。

@@ -3,6 +3,7 @@ import { getAuthToken } from '@/api/authToken'
 import { useAppStore } from '@/stores/appStore'
 import { torrentApi } from '@/api/torrent'
 import { APP_BASE } from '@/platform/appBase'
+import { DEMO_MODE, DemoSocket } from '@/demo'
 import type { WsMessage } from '@/types'
 
 export type WsStatus = 'connecting' | 'connected' | 'disconnected'
@@ -72,12 +73,16 @@ export function useWebSocket() {
       const token = getAuthToken()
       const handshake = token ? `?token=${encodeURIComponent(token)}` : ''
       let socket: WebSocket
-      try {
-        // APP_BASE：网关部署时的基础路径（见 platform/appBase），直连部署为空串
-        socket = new WebSocket(`${proto}://${location.host}${APP_BASE}/ws${handshake}`)
-      } catch {
-        startPolling()
-        return
+      if (DEMO_MODE) {
+        socket = new DemoSocket() as unknown as WebSocket
+      } else {
+        try {
+          // APP_BASE：网关部署时的基础路径（见 platform/appBase），直连部署为空串
+          socket = new WebSocket(`${proto}://${location.host}${APP_BASE}/ws${handshake}`)
+        } catch {
+          startPolling()
+          return
+        }
       }
       ws = socket
       setStatus('connecting')

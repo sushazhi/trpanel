@@ -272,6 +272,10 @@ export default {
     selectAllFiltered: 'Select all results ({{n}})',
     deselectAllFiltered: 'Deselect current results ({{n}})',
   },
+  demo: {
+    badge: 'Demo',
+    tip: 'Data is simulated in your browser, for preview only',
+  },
   floatingBar: {
     label: 'Quick actions',
     expand: 'Expand toolbar',
@@ -493,7 +497,7 @@ export default {
       tokenHint: "Clients authenticate with 'Authorization: Bearer <token>'; leave empty to disable. Update your AI client config after changing it",
       tokenPlaceholder: 'Empty = no auth',
       endpointHint: 'Endpoint: {{endpoint}}',
-      gatewayHint: 'On fnOS, connect to the service port directly — the gateway URL only serves the web UI',
+      gatewayHint: "AI clients should use the endpoint above — on fnOS it is a dedicated port (allow it through the firewall); the gateway URL only serves the web UI",
     },
     pollIntervalHint: 'How often the list refreshes; shorter means more resource use',
     portTestHint: 'Check whether the listening port is reachable from outside',

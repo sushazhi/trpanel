@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex" />
+<title>trpanel 移动版预览 · Mobile Preview</title>
+<style>
+  :root {
+    --bg: #070a14;
+    --text: #e8ecf6;
+    --muted: #8a93ad;
+    --line: rgba(255, 255, 255, 0.12);
+    --brand-a: #007aff;
+    --brand-b: #8b5cf6;
+    --screen-w: 390px;
+    --screen-h: 844px;
+    --bezel: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 展台氛围：品牌双色辉光 + 细点阵 */
+  .glow { position: fixed; border-radius: 50%; filter: blur(90px); pointer-events: none; animation: fadeIn 1.4s ease both; }
+  .glow.a { width: 46vw; height: 46vw; left: -12vw; top: -14vw; background: rgba(0, 122, 255, 0.17); }
+  .glow.b { width: 40vw; height: 40vw; right: -10vw; bottom: -12vw; background: rgba(139, 92, 246, 0.15); animation-delay: 0.15s; }
+  .dots {
+    position: fixed; inset: 0; pointer-events: none;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 26px 26px;
+    mask-image: radial-gradient(ellipse at 50% 42%, black 30%, transparent 78%);
+  }
+
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 3;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 28px;
+    animation: drop 0.8s 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .wordmark { display: flex; align-items: baseline; gap: 10px; }
+  .wordmark b {
+    font-size: 17px; font-weight: 800; letter-spacing: 0.2px;
+    background: linear-gradient(100deg, var(--brand-a), var(--brand-b));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .wordmark span { font-size: 12.5px; color: var(--muted); letter-spacing: 0.4px; }
+  .to-desktop {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--text);
+    font-size: 13px; text-decoration: none;
+    background: rgba(255, 255, 255, 0.03);
+    transition: background 0.25s, border-color 0.25s, transform 0.25s;
+  }
+  .to-desktop:hover { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.24); transform: translateY(-1px); }
+
+  main { flex: 1; display: flex; align-items: center; justify-content: center; }
+
+  .device {
+    position: relative;
+    width: calc(var(--screen-w) + var(--bezel) * 2);
+    height: calc(var(--screen-h) + var(--bezel) * 2);
+    border-radius: 58px;
+    padding: var(--bezel);
+    background: linear-gradient(150deg, #20263a, #05060b 55%);
+    box-shadow:
+      inset 0 0 0 1.5px rgba(255, 255, 255, 0.09),
+      0 60px 120px -30px rgba(0, 0, 0, 0.8),
+      0 0 90px -18px rgba(59, 130, 246, 0.22);
+    animation: rise 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  /* 侧键 */
+  .device::before, .device::after {
+    content: ""; position: absolute; border-radius: 3px;
+    background: linear-gradient(90deg, #2a3046, #10131f);
+  }
+  .device::before { left: -2.5px; top: 190px; width: 3px; height: 64px; }   /* 音量 */
+  .device::after  { right: -2.5px; top: 226px; width: 3px; height: 96px; }  /* 电源 */
+
+  .screen {
+    position: relative;
+    width: var(--screen-w); height: var(--screen-h);
+    border-radius: 46px; overflow: hidden;
+    background: #0b0e1a;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+  .screen iframe { width: 100%; height: 100%; border: 0; display: block; }
+  /* 玻璃反光，不挡触控 */
+  .screen .sheen {
+    position: absolute; inset: 0; pointer-events: none; z-index: 2;
+    background: linear-gradient(108deg, transparent 42%, rgba(255, 255, 255, 0.055) 47%, rgba(255, 255, 255, 0.015) 54%, transparent 60%);
+  }
+  /* 灵动岛 */
+  .island {
+    position: absolute; z-index: 3; top: 12px; left: 50%; transform: translateX(-50%);
+    width: 116px; height: 33px; border-radius: 20px; background: #000;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+  .island i {
+    position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+    width: 9px; height: 9px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #1e2a44, #05070d 70%);
+  }
+
+  footer {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 3;
+    text-align: center; padding: 18px;
+    font-size: 12px; color: var(--muted); letter-spacing: 0.5px;
+    animation: fadeIn 1.2s 0.45s both;
+  }
+  footer a { color: var(--muted); }
+  footer .sep { margin: 0 8px; opacity: 0.5; }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(28px) scale(0.965); } }
+  @keyframes drop { from { opacity: 0; transform: translateY(-14px); } }
+  @keyframes fadeIn { from { opacity: 0; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .glow, header, footer, .device { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="glow a"></div>
+  <div class="glow b"></div>
+  <div class="dots"></div>
+
+  <header>
+    <div class="wordmark"><b>trpanel</b><span>移动版预览 · Mobile Preview</span></div>
+    <a class="to-desktop" href="./index.html">电脑版 →</a>
+  </header>
+
+  <main>
+    <div class="device" id="device">
+      <div class="screen">
+        <iframe src="./index.html" title="trpanel mobile preview"></iframe>
+        <div class="sheen"></div>
+        <div class="island"><i></i></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    数据在浏览器内模拟生成，仅供界面预览
+    <span class="sep">·</span>
+    <a href="./index.html">Desktop</a>
+  </footer>
+
+<script>
+  // 真机小屏直接看应用本体，手机壳只在宽屏演示时出现
+  if (window.matchMedia('(max-width: 700px)').matches && 'ontouchstart' in window) {
+    location.replace('./index.html')
+  } else {
+    var device = document.getElementById('device')
+    var fit = function () {
+      var s = Math.min(1, (innerHeight - 150) / device.offsetHeight, (innerWidth - 40) / device.offsetWidth)
+      device.style.transform = 'scale(' + s + ')'
+      device.style.marginBlock = -(device.offsetHeight * (1 - s) / 2) + 'px'
+    }
+    fit()
+    addEventListener('resize', fit)
+  }
+</script>
+</body>
+</html>

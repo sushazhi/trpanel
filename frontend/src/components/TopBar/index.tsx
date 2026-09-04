@@ -27,6 +27,7 @@ import { useRevealPath } from '@/hooks/useRevealPath'
 import { useSemanticPath } from '@/hooks/useSemanticPath'
 import { usePlatform } from '@/platform'
 import { useAppStore } from '@/stores/appStore'
+import { DEMO_MODE } from '@/demo'
 import { cn, cssVars } from '@/lib/utils'
 import { tagColor } from '@/utils/tagColor'
 import { toast } from '@/lib/toast'
@@ -203,11 +204,19 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
           <span className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--brand-grad-from)] to-[var(--brand-grad-to)] flex items-center justify-center shadow-lg shadow-primary/30">
             <span className="text-white font-bold text-body tracking-tight">TR</span>
           </span>
-          <div className="leading-tight hidden sm:block">
+          <div className="leading-tight hidden sm:flex items-center gap-2">
             <span className="font-semibold text-subhead text-gray-800 dark:text-gray-100">
               <span className="text-primary">trpanel</span>
               {can('app.update') && <span className="text-gray-400 dark:text-gray-500 font-medium text-body"> for fnOS</span>}
             </span>
+            {DEMO_MODE && (
+              <span
+                title={t('demo.tip')}
+                className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-caption2 font-medium whitespace-nowrap"
+              >
+                {t('demo.badge')}
+              </span>
+            )}
           </div>
         </div>
 
@@ -377,9 +386,9 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
           {filters.labels.map((label) => (
             <FilterChip
               key={label}
-              label={`#${label}`}
+              label={label === '__none__' ? t('nav.noLabel') : `#${label}`}
               onRemove={() => setFilters({ labels: filters.labels.filter((l) => l !== label) })}
-              color={tagColor(label)}
+              color={label === '__none__' ? '#9ca3af' : tagColor(label)}
             />
           ))}
           {filters.sites.map((siteId) => (

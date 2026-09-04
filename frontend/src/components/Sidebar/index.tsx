@@ -211,6 +211,22 @@ export const DesktopSidebar: React.FC = () => {
     return Array.from(m.entries()).sort((a, b) => b[1] - a[1]).map(([k, c]) => [k, c, s.get(k) ?? 0] as const)
   }, [torrents])
 
+  // 「全部」与「无标签」两行的计数（无标签走 __none__ 哨兵值过滤）
+  const labelExtra = useMemo(() => {
+    let none = 0
+    let noneSize = 0
+    let totalSize = 0
+    for (const tr of torrents) {
+      totalSize += tr.totalSize || 0
+      if (!tr.labels || tr.labels.length === 0) {
+        none++
+        noneSize += tr.totalSize || 0
+      }
+    }
+    return { none, noneSize, totalSize }
+  }, [torrents])
+  const noLabelActive = filters.labels.includes('__none__')
+
   const dirCounts = useMemo(() => {
     const m = new Map<string, number>()
     const s = new Map<string, number>()
@@ -402,7 +418,7 @@ export const DesktopSidebar: React.FC = () => {
             </div>
           )}
 
-          {/* 目录分布 */}
+          {/* 数据目录 */}
           {sidebarMenuVisible.dirs && dirCounts.length > 0 && (
             <div className="shrink-0">
               <SectionHeader
@@ -463,6 +479,50 @@ export const DesktopSidebar: React.FC = () => {
               />
               {!sidebarCollapsed.labels && (
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <button
+                    onClick={() => setFilters({ labels: [] })}
+                    onDoubleClick={() => dblSelect(torrents.map((t) => t.id))}
+                    className={cn(
+                      'tm-chip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-body font-medium transition-all tm-nav-item',
+                      filters.labels.length === 0 ? 'scale-105' : 'opacity-90 hover:opacity-100',
+                    )}
+                    data-active={filters.labels.length === 0 || undefined}
+                    style={cssVars({ '--chip': '#9ca3af' })}
+                  >
+                    {filters.labels.length === 0 && <Check className="w-3 h-3 shrink-0" strokeWidth={2.6} />}
+                    {t('nav.all')}
+                    {groupShowSize && labelExtra.totalSize > 0 && (
+                      <span className="tm-mono text-caption2 opacity-70">{formatBytes(labelExtra.totalSize)}</span>
+                    )}
+                    <span className="tm-mono text-caption2 opacity-70">{torrents.length}</span>
+                  </button>
+                  {labelExtra.none > 0 && (
+                    <button
+                      onClick={() =>
+                        setFilters({
+                          labels: noLabelActive
+                            ? filters.labels.filter((l) => l !== '__none__')
+                            : [...filters.labels, '__none__'],
+                        })
+                      }
+                      onDoubleClick={() =>
+                        dblSelect(torrents.filter((t) => !t.labels || t.labels.length === 0).map((t) => t.id))
+                      }
+                      className={cn(
+                        'tm-chip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-body font-medium transition-all tm-nav-item',
+                        noLabelActive ? 'scale-105' : 'opacity-90 hover:opacity-100',
+                      )}
+                      data-active={noLabelActive || undefined}
+                      style={cssVars({ '--chip': '#9ca3af' })}
+                    >
+                      {noLabelActive && <Check className="w-3 h-3 shrink-0" strokeWidth={2.6} />}
+                      {t('nav.noLabel')}
+                      {groupShowSize && labelExtra.noneSize > 0 && (
+                        <span className="tm-mono text-caption2 opacity-70">{formatBytes(labelExtra.noneSize)}</span>
+                      )}
+                      <span className="tm-mono text-caption2 opacity-70">{labelExtra.none}</span>
+                    </button>
+                  )}
                   {labelCounts.map(([label, count, size]) => {
                     const isActive = filters.labels.includes(label)
                     const color = tagColor(label)
@@ -1012,6 +1072,12 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
     return Array.from(m.entries()).sort((a, b) => b[1] - a[1])
   }, [torrents])
 
+  // 「全部」与「无标签」徽标用（无标签走 __none__ 哨兵值过滤）
+  const noLabelCount = useMemo(
+    () => torrents.reduce((n, tr) => n + (!tr.labels || tr.labels.length === 0 ? 1 : 0), 0),
+    [torrents],
+  )
+
   // 错误分布（按错误信息分组，次数降序）
   const errorCounts = useMemo(() => {
     const m = new Map<string, number>()
@@ -1197,7 +1263,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
             <div>
               <SectionHeader
                 icon={<AlertCircle className="w-3.5 h-3.5" />}
-                title={t('nav.error')}
+                title={t('nav.errors')}
                 count={errorCounts.length}
                 collapsed={sidebarCollapsed.error}
                 onToggle={() => setSidebarCollapsed({ error: !sidebarCollapsed.error })}
@@ -1245,6 +1311,42 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
               />
               {!sidebarCollapsed.labels && (
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <button
+                    onClick={() => { setFilters({ labels: [] }); onClose() }}
+                    className={cn(
+                      'tm-chip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-body font-medium transition-all tm-nav-item',
+                      filters.labels.length === 0 ? 'scale-105' : 'opacity-90 hover:opacity-100',
+                    )}
+                    data-active={filters.labels.length === 0 || undefined}
+                    style={cssVars({ '--chip': '#9ca3af' })}
+                  >
+                    {filters.labels.length === 0 && <Check className="w-3 h-3 shrink-0" strokeWidth={2.6} />}
+                    {t('nav.all')}
+                    <span className="tm-mono text-caption2 opacity-70">{torrents.length}</span>
+                  </button>
+                  {noLabelCount > 0 && (
+                    <button
+                      onClick={() => {
+                        const isActive = filters.labels.includes('__none__')
+                        setFilters({
+                          labels: isActive
+                            ? filters.labels.filter((l) => l !== '__none__')
+                            : [...filters.labels, '__none__'],
+                        })
+                        onClose()
+                      }}
+                      className={cn(
+                        'tm-chip inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-body font-medium transition-all tm-nav-item',
+                        filters.labels.includes('__none__') ? 'scale-105' : 'opacity-90 hover:opacity-100',
+                      )}
+                      data-active={filters.labels.includes('__none__') || undefined}
+                      style={cssVars({ '--chip': '#9ca3af' })}
+                    >
+                      {filters.labels.includes('__none__') && <Check className="w-3 h-3 shrink-0" strokeWidth={2.6} />}
+                      {t('nav.noLabel')}
+                      <span className="tm-mono text-caption2 opacity-70">{noLabelCount}</span>
+                    </button>
+                  )}
                   {labelCounts.map(([label, count]) => {
                     const isActive = filters.labels.includes(label)
                     const color = tagColor(label)

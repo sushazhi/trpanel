@@ -27,6 +27,7 @@ type Config struct {
 	MCPEnabled       bool          // 启用 MCP 服务（/mcp 端点，供 AI 客户端接入）
 	MCPAllowDelete   bool          // 允许通过 MCP 删除种子（高危操作，默认关闭）
 	MCPToken         string        // MCP 接入令牌；空表示不启用（仅建议回环 / 内网使用）
+	MCPPort          string        // MCP 专用直连端口；空表示不开启（socket 部署下供 AI 客户端绕过网关直连）
 }
 
 // Load 加载配置，优先级：环境变量 > .env.local > .env > config.yaml > 默认值
@@ -55,6 +56,7 @@ func Load() (*Config, error) {
 	v.SetDefault("mcp_enabled", false)
 	v.SetDefault("mcp_allow_delete", false)
 	v.SetDefault("mcp_token", "")
+	v.SetDefault("mcp_port", "")
 
 	// 配置文件（可选）
 	if err := v.ReadInConfig(); err != nil {
@@ -102,6 +104,7 @@ func Load() (*Config, error) {
 		"mcp_enabled":      "MCP_ENABLED",
 		"mcp_allow_delete": "MCP_ALLOW_DELETE",
 		"mcp_token":        "MCP_TOKEN",
+		"mcp_port":         "MCP_PORT",
 	}
 	for key, env := range envKeys {
 		if val, ok := os.LookupEnv(env); ok {
@@ -135,6 +138,7 @@ func Load() (*Config, error) {
 		MCPEnabled:       v.GetBool("mcp_enabled"),
 		MCPAllowDelete:   v.GetBool("mcp_allow_delete"),
 		MCPToken:         strings.TrimSpace(v.GetString("mcp_token")),
+		MCPPort:          strings.TrimSpace(v.GetString("mcp_port")),
 	}, nil
 }
 

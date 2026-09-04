@@ -37,6 +37,7 @@ type Handler struct {
 	plat        platform.Platform
 	dataDir     string
 	apiToken    string
+	mcpPort     string
 	mcp         *McpControl
 }
 
@@ -55,6 +56,7 @@ func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store
 		plat:        plat,
 		dataDir:     cfg.DataDir,
 		apiToken:    cfg.APIToken,
+		mcpPort:     cfg.MCPPort,
 		mcp:         mcp,
 	}
 }

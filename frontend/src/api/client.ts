@@ -3,12 +3,16 @@ import type { ApiResponse } from '@/types'
 import { APP_BASE } from '@/platform/appBase'
 import { getMessage } from '@/utils/messageHolder'
 import { translateApiError } from '@/utils/errors'
+import { DEMO_MODE, demoAdapter } from '@/demo'
 import { getAuthToken, UNAUTHORIZED_EVENT } from './authToken'
 
 export const client = axios.create({
   baseURL: APP_BASE + '/api',
   timeout: 30000,
 })
+
+// 演示模式：请求在浏览器内被 mock adapter 应答，无需真实后端
+if (DEMO_MODE) client.defaults.adapter = demoAdapter
 
 // 请求拦截：服务端启用 API_TOKEN 时，鉴权令牌只走请求头
 client.interceptors.request.use((config) => {

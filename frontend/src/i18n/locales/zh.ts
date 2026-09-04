@@ -39,7 +39,7 @@ export default {
     freeSpace: '剩余空间',
   },
   site: {
-    nav: '站点',
+    nav: '站点分布',
     all: '全部站点',
     other: '其他',
     searchAria: '搜索站点',
@@ -68,10 +68,10 @@ export default {
     paused: '已暂停',
     error: '错误',
     verifying: '校验中',
-    labels: '标签',
-    noLabel: '未标记',
+    labels: '种子标签',
+    noLabel: '无标签',
     errors: '错误分布',
-    dirs: '目录分布',
+    dirs: '数据目录',
     sites: '站点',
     filter: '过滤器',
     selectByDoubleClick: '双击选中该分类全部种子',
@@ -225,8 +225,8 @@ export default {
   sidebar: {
     status: '种子状态',
     statusFilter: '状态过滤器',
-    labels: '用户标签',
-    dirs: '目录分布',
+    labels: '种子标签',
+    dirs: '数据目录',
     sites: '站点分布',
     error: '错误分布',
     enableDoubleClickSelect: '双击全选分组',
@@ -269,6 +269,10 @@ export default {
     addTask: '添加任务',
     selectAllFiltered: '全选当前结果（{{n}} 项）',
     deselectAllFiltered: '取消选中当前结果（{{n}} 项）',
+  },
+  demo: {
+    badge: '演示模式',
+    tip: '数据在浏览器内模拟生成，仅供界面预览',
   },
   floatingBar: {
     label: '快捷工具条',
@@ -491,7 +495,7 @@ export default {
       tokenHint: '客户端以 Authorization: Bearer <令牌> 鉴权；留空表示不启用，修改后需同步更新 AI 客户端配置',
       tokenPlaceholder: '留空 = 不启用鉴权',
       endpointHint: '接入地址：{{endpoint}}',
-      gatewayHint: '飞牛部署需直连服务端口，网关地址仅界面可用',
+      gatewayHint: 'AI 客户端请直连上方地址（飞牛部署为独立端口，需在防火墙放行）；网关地址仅界面可用',
     },
     // 开关与选项的一行说明（规范：设置项必须配说明，见 docs/liquid-glass-spec.md）
     pollIntervalHint: '列表数据刷新频率，越短资源占用越高',

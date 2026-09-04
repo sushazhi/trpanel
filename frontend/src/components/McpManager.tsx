@@ -19,17 +19,19 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
   const [allowDelete, setAllowDelete] = useState(false)
   const [token, setToken] = useState('')
   const [draft, setDraft] = useState('')
+  const [mcpPort, setMcpPort] = useState('')
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
     request(clientGetSettings()).then((d) => {
       if (cancelled) return
-      const data = d as { mcpEnabled?: boolean; mcpAllowDelete?: boolean; mcpToken?: string }
+      const data = d as { mcpEnabled?: boolean; mcpAllowDelete?: boolean; mcpToken?: string; mcpPort?: string }
       setEnabled(!!data.mcpEnabled)
       setAllowDelete(!!data.mcpAllowDelete)
       setToken(data.mcpToken ?? '')
       setDraft(data.mcpToken ?? '')
+      setMcpPort(data.mcpPort ?? '')
     }).catch(() => {})
     return () => { cancelled = true }
   }, [open])
@@ -83,7 +85,11 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
             />
           </Row>
           <p className="text-caption1 text-gray-400 pt-1">
-            {t('session.mcp.endpointHint', { endpoint: `${window.location.origin}${APP_BASE}/mcp` })}
+            {t('session.mcp.endpointHint', {
+              endpoint: mcpPort
+                ? `http://${window.location.hostname}:${mcpPort}/mcp`
+                : `${window.location.origin}${APP_BASE}/mcp`,
+            })}
           </p>
           <p className="text-caption1 text-gray-400">{t('session.mcp.gatewayHint')}</p>
         </div>

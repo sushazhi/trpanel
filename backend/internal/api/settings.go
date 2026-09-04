@@ -26,6 +26,7 @@ func (h *Handler) getSettings(c *gin.Context) {
 		"mcpEnabled":     h.mcp.Enabled.Load(),
 		"mcpAllowDelete": h.mcp.AllowDelete.Load(),
 		"mcpToken":       mcpToken,
+		"mcpPort":        h.mcpPort,
 	})
 }
 
