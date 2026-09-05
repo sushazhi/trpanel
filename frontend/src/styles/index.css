@@ -242,8 +242,11 @@
 
 /* ===== 材质层（非 Tailwind 命名空间，手写 CSS 消费）===== */
 :root {
-  /* 视口安全区（index.html 已开启 viewport-fit=cover） */
-  --safe-top: env(safe-area-inset-top, 0px);
+  /* 视口安全区（index.html 已开启 viewport-fit=cover）。
+     inset-top 用 min() 封顶：部分内嵌 WebView 会虚报（把自家工具栏高度算进来，
+     一报 80–100px，顶栏被整体推走留出大空白）。真实设备最大也就灵动岛 59px，
+     60px 的上限不伤合法值 */
+  --safe-top: min(env(safe-area-inset-top, 0px), 60px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);

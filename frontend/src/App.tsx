@@ -5,6 +5,7 @@ import { torrentApi, sessionApi } from '@/api/torrent'
 import { AddTorrent } from '@/components/AddTorrent'
 import { AppUpdatePrompt } from '@/components/AppUpdatePrompt'
 import { AuthTokenDialog } from '@/components/AuthTokenDialog'
+import { CreateTorrentDialog } from '@/components/CreateTorrentDialog'
 import { Dashboard } from '@/components/Dashboard'
 import { DesktopSidebar, MobileDrawer, STATUS_ITEMS } from '@/components/Sidebar'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
@@ -18,6 +19,7 @@ import { useFilter } from '@/hooks/useFilter'
 import { useGlassChrome } from '@/hooks/useGlassChrome'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useResponsive } from '@/hooks/useResponsive'
+import { useSafeAreaGuard } from '@/hooks/useSafeAreaGuard'
 import { useSwipeGesture } from '@/hooks/useSwipeGesture'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { usePlatform } from '@/platform'
@@ -81,6 +83,7 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [dashboardOpen, setDashboardOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   const [cleanOpen, setCleanOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [detailTorrent, setDetailTorrent] = useState<Torrent | null>(null)
@@ -104,6 +107,9 @@ export default function App() {
     top: topDockRef,
     bottoms: [statusDockRef],
   })
+
+  // fnOS App 等内嵌 WebView 虚报 inset-top 时归零，顶栏不被推离屏幕顶
+  useSafeAreaGuard()
 
   useKeyboardShortcuts({
     onAdd: () => setAddOpen(true),
@@ -383,6 +389,7 @@ export default function App() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenAdd={() => setAddOpen(true)}
           onOpenDashboard={() => setDashboardOpen(true)}
+          onOpenCreate={() => setCreateOpen(true)}
           onOpenLabels={() => {
             const first = torrents.find((t) => selectedIds.includes(t.id))
             setBatchLabels(first?.labels ?? [])
@@ -391,7 +398,7 @@ export default function App() {
           filteredIds={filteredIds}
         />
         {/* 分类标题行仅移动端保留（桌面端排序/视图/刷新已并入顶栏） */}
-        {isMobile && <ListHeader count={filtered.length} isMobile onOpenDashboard={() => setDashboardOpen(true)} />}
+        {isMobile && <ListHeader count={filtered.length} isMobile onOpenDashboard={() => setDashboardOpen(true)} onOpenCreate={() => setCreateOpen(true)} />}
       </div>
 
       {/* 底部停靠栏 */}
@@ -430,6 +437,7 @@ export default function App() {
         initialText={addInitial?.text}
       />
       <Dashboard open={dashboardOpen} onClose={() => setDashboardOpen(false)} />
+      <CreateTorrentDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       <BatchCleanDialog open={cleanOpen} onClose={() => setCleanOpen(false)} />
       <TorrentDetail torrent={detailTorrent} onClose={() => setDetailTorrent(null)} onOpenChange={(open) => { if (!open) setDetailTorrent(null) }} isMobile={isMobile} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Check,
+  FilePlus2,
   FolderCog,
   FolderInput,
   FolderOpen,
@@ -41,6 +42,7 @@ interface Props {
   onOpenSettings: () => void
   onOpenAdd: () => void
   onOpenDashboard: () => void
+  onOpenCreate: () => void
   onOpenLabels: () => void
   filteredIds: number[]
   isMobile?: boolean
@@ -89,7 +91,7 @@ const THEME_PRESETS: { id: string; from: string; to: string }[] = [
 ]
 
 // 玻璃悬浮顶栏：单行 —— Logo + 搜索 + 批量操作（选中时出现在同行）+ 排序/视图/刷新 + 添加 + 头像
-export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashboard, onOpenLabels, filteredIds, isMobile, onOpenDrawer }) => {
+export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashboard, onOpenCreate, onOpenLabels, filteredIds, isMobile, onOpenDrawer }) => {
   const { t } = useTranslation()
   const search = useAppStore((s) => s.filters.search)
   const filters = useAppStore((s) => s.filters)
@@ -296,6 +298,9 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
               <ToolBtn icon={FolderCog} title={t('action.configDir')} onClick={() => void configDir()} />
             </>
           )}
+
+          {/* 创建种子：桌面端与添加任务并排（移动端在分类标题行） */}
+          {!isMobile && <ToolBtn icon={FilePlus2} title={t('createTorrent.title')} onClick={onOpenCreate} />}
 
           {!isMobile && (
             <Button

@@ -36,3 +36,6 @@ tm-state.json
 .DS_Store
 Thumbs.db
 backend/trpanel-linux-arm64
+
+# ===== TS 增量构建缓存 =====
+*.tsbuildinfo
