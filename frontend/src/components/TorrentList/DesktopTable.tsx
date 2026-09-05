@@ -190,7 +190,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
   const headerRef = useRef<HTMLDivElement>(null)
   const dragIdRef = useRef<number | null>(null)
   const lastClickRef = useRef<{ id: number; t: number }>({ id: -1, t: 0 })
-  const rowHeight = singleLine ? 48 : 68
+  const rowHeight = singleLine ? 40 : 56
 
   // 表头横向滚动与内容区同步（表头独立于虚拟滚动容器，需手动镜像 scrollLeft）
   const syncHeaderScroll = (e: React.UIEvent<HTMLDivElement>) => {

@@ -133,7 +133,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
       className="tm-scroll h-full"
       style={{ paddingLeft: 'calc(var(--safe-left) + 0.75rem)', paddingRight: 'calc(var(--safe-right) + 0.75rem)' }}
     >
-      <div className="flex flex-col gap-2.5 max-w-5xl mx-auto">
+      <div className="flex flex-col gap-1.5 max-w-5xl mx-auto">
         {torrents.map((torrent) => {
           const menuItems = buildTorrentMenu({
             actions,
@@ -162,7 +162,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                 data-selected={selected || undefined}
                 data-torrent-id={torrent.id}
                 className={cn(
-                  'glass-card tm-card flex items-start gap-3.5 p-3.5 cursor-default select-none group',
+                  'glass-card tm-card flex items-start gap-3.5 px-3 py-2 cursor-default select-none group',
                   selected && 'z-[1]',
                 )}
               >
@@ -217,15 +217,17 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                     </span>
                   </div>
 
-                  {/* 进度条（scaleX 驱动）+ 移动端标签靠右 */}
-                  <div className="flex items-center gap-2.5 mt-2">
-                    <ProgressBar value={pct} error={torrent.error > 0} className="flex-1" />
+                  {/* 大小 + 进度条（scaleX 驱动）+ 状态点；移动端标签靠右挤同一行。
+                      进度条给保底宽度，标签再长也先截断标签，避免条被挤成一条缝 */}
+                  <div className="flex items-center gap-2.5 mt-1.5">
+                    <span className="tm-mono shrink-0 text-footnote text-gray-500 dark:text-gray-400">{downloadedSize}</span>
+                    <ProgressBar value={pct} error={torrent.error > 0} className="flex-1 min-w-20" />
                     <span
                       className={cn('w-2 h-2 rounded-full shrink-0', dot.pulse && 'animate-pulse')}
                       style={{ backgroundColor: dot.color }}
                     />
                     {labels.length > 0 && (
-                      <span className="md:hidden flex items-center justify-end gap-1.5 min-w-0 max-w-[52%] shrink">
+                      <span className="md:hidden flex items-center justify-end gap-1.5 min-w-0 max-w-[40%] shrink">
                         {labels.slice(0, 2).map((l) => {
                           const color = tagColor(l)
                           return (
@@ -239,10 +241,10 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                     )}
                   </div>
 
-                  {/* 元信息：已下载大小 / 下行 / 上行 / 分享率 / 做种时长 同行，自适应宽度；
+                  {/* 元信息：下行 / 上行 / 分享率 / 做种时长（未完成时为剩余时间）。
+                      移动端 space-between 铺满整行（跨度再宽也不挤在左边），桌面保持左聚；
                       手机上放不下时允许折行（全 shrink-0 + nowrap 会整行溢出被裁掉，做种时长就看不见了） */}
-                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-footnote text-gray-500 dark:text-gray-400 mt-1.5 min-w-0 overflow-hidden">
-                    <span className="tm-mono shrink-0">{downloadedSize}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-0.5 text-footnote text-gray-500 dark:text-gray-400 mt-1 min-w-0 overflow-hidden md:justify-start">
                     <span className="tm-mono shrink-0 text-green-600 dark:text-green-400">↓{formatSpeed(torrent.rateDownload)}</span>
                     <span className="tm-mono shrink-0 text-blue-600 dark:text-blue-400">↑{formatSpeed(torrent.rateUpload)}</span>
                     <Sep />

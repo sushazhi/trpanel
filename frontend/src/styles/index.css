@@ -1030,7 +1030,7 @@ html[data-wallpaper='on'].dark .tm-shell::before {
 /* 移动端列表不做虚拟滚动，改为让浏览器跳过屏外卡片的布局与绘制 */
 .tm-card {
   content-visibility: auto;
-  contain-intrinsic-size: auto 108px;
+  contain-intrinsic-size: auto 84px;
 }
 
 /* 触屏基础：点击无闪烁高亮、长按不弹系统菜单（长按卡片走自定义右键菜单）、界面元素不误选中 */
