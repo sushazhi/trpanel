@@ -2,15 +2,16 @@
 # Transmission），发布到 GitHub Pages。首次启用需在仓库 Settings → Pages
 # 把 Source 设为 GitHub Actions。
 #
-# 触发器：发布 GitHub Release 时自动更新；也支持手动触发。
-# 注意：release 事件下 GITHUB_REF 指向发布标签，github-pages 环境默认只允许默认分支部署，
-# 因此需一次性去 Settings → Environments → github-pages → Deployment branches and tags
-# 放行 v*（选 Selected branches and tags 后添加 master 与 v*），否则部署会被环境规则拒绝。
+# 触发器：推送 v* 标签时自动更新；也支持手动触发。
+# 注意：github-pages 环境默认只放行默认分支部署，因此需一次性在
+# Settings → Environments → github-pages → Deployment branches and tags
+# 选「Selected branches and tags」并添加 master 与 v*，否则打标签部署会被环境规则拒绝。
 name: Demo Pages
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
