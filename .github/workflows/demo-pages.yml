@@ -2,15 +2,15 @@
 # Transmission），发布到 GitHub Pages。首次启用需在仓库 Settings → Pages
 # 把 Source 设为 GitHub Actions。
 #
-# 触发器：master 分支有推送时自动更新；也支持手动触发。
-# 不用 tag 触发——github-pages 环境默认只允许默认分支部署，
-# 打 tag 会被环境规则拒绝（除非去 Environment 里额外放行标签）。
+# 触发器：发布 GitHub Release 时自动更新；也支持手动触发。
+# 注意：release 事件下 GITHUB_REF 指向发布标签，github-pages 环境默认只允许默认分支部署，
+# 因此需一次性去 Settings → Environments → github-pages → Deployment branches and tags
+# 放行 v*（选 Selected branches and tags 后添加 master 与 v*），否则部署会被环境规则拒绝。
 name: Demo Pages
 
 on:
-  push:
-    branches:
-      - master
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
