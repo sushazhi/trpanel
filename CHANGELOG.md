@@ -70,5 +70,6 @@
 - 收紧鉴权、路径读取与配置写入的安全边界
 - 网关模式下信任宿主认证，放宽同源校验
 
-[未发布]: https://github.com/sushazhi/trpanel/compare/v0.1.0...HEAD
+[未发布]: https://github.com/sushazhi/trpanel/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/sushazhi/trpanel/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/sushazhi/trpanel/releases/tag/v0.1.0

@@ -65,10 +65,56 @@ jobs:
           cd release
           sha256sum trpanel-*.tar.gz > "checksums-${TAG}-sha256.txt"
 
+      # Release 正文取 CHANGELOG.md 中「本版本」那一节（面向用户、已分好类），
+      # 而不是 GitHub 自动生成的 commit 列表 + Full Changelog
+      - name: 提取本版本更新日志
+        id: notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -e
+          python3 - <<'PY'
+          import os, re
+
+          ver = os.environ["TAG"].lstrip("v")
+          out, found = [], False
+          for line in open("CHANGELOG.md", encoding="utf-8").read().splitlines():
+              m = re.match(r"^## \[([^\]]+)\]", line)
+              if m:                      # 版本标题行：定位本节 / 结束
+                  if found:
+                      break
+                  if m.group(1).lstrip("v") == ver:
+                      found = True
+                  continue
+              if found:
+                  out.append(line)
+          while out and not out[0].strip():
+              out.pop(0)
+          while out and not out[-1].strip():
+              out.pop()
+          with open("release-notes.md", "w", encoding="utf-8") as f:
+              f.write("\n".join(out) + "\n" if out else "")
+          PY
+          # 末尾补上与上一版本的提交对比链接（CHANGELOG 未记录的小改动也能查到）
+          git fetch --tags --force -q || true
+          prev=$(git tag -l 'v*' | grep -v -x "${TAG}" | sort -V | tail -n 1 || true)
+          if [ -s release-notes.md ]; then
+            if [ -n "${prev}" ]; then
+              printf '\n---\n\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+                "${GITHUB_REPOSITORY}" "${prev}" "${TAG}" >> release-notes.md
+            fi
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            # CHANGELOG 还没补这一节时，退回 GitHub 自动生成的 notes
+            echo "::warning::CHANGELOG.md 中没有 ${TAG} 的章节，回退为自动生成的更新日志"
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 创建 GitHub Release 并上传产物
         uses: softprops/action-gh-release@v3
         with:
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.has_notes == 'true' && 'release-notes.md' || '' }}
+          generate_release_notes: ${{ steps.notes.outputs.has_notes != 'true' }}
           files: |
             release/trpanel-*.tar.gz
             release/checksums-*-sha256.txt
