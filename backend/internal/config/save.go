@@ -34,6 +34,7 @@ type LocalSettings struct {
 	// MCPAllowDangerous 允许通过 MCP 执行移动 / 重命名 / 立即执行做种策略等其它高危操作
 	MCPAllowDangerous bool
 	MCPToken          string // 空 = 显式关闭令牌鉴权（写入空值行，避免被 config.yaml 复活）
+	MCPPort           string // 空 = 显式关闭直连端口（写入空值行，避免被 config.yaml 复活）；修改需重启生效
 }
 
 // SaveLocalSettings 将界面配置保存到数据目录（默认 ~/.trpanel）。
@@ -48,6 +49,7 @@ func SaveLocalSettings(dataDir string, s LocalSettings) error {
 		{"TR_PASS", s.Pass, true},
 		{"POLL_INTERVAL", s.PollInterval, false},
 		{"MCP_TOKEN", s.MCPToken, true},
+		{"MCP_PORT", s.MCPPort, true},
 		{"MCP_ENABLED", strconv.FormatBool(s.MCPEnabled), true},
 		{"MCP_ALLOW_DELETE", strconv.FormatBool(s.MCPAllowDelete), true},
 		{"MCP_ALLOW_DANGEROUS", strconv.FormatBool(s.MCPAllowDangerous), true},

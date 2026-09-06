@@ -117,42 +117,6 @@ API_TOKEN=change-me docker compose up -d
 > ⚠️ 容器内 `SERVER_HOST=0.0.0.0`，**未设置 `API_TOKEN` 时服务会拒绝启动**（防止局域网裸奔）；令牌在浏览器首次访问时粘贴一次即可，之后持久化在本地。
 > 镜像由 [Docker 工作流](.github/workflows/docker.yml)自动构建发布：仅推送 `v*` 标签触发多架构构建；PR 只验证构建不推送。GHCR 包首次发布后需在仓库 **Packages → Package settings** 中把可见性改为 Public，才能匿名拉取。
 
-#### 🇨🇳 国内加速拉取
-
-`ghcr.io` 在国内直连常常很慢或超时，可把 `ghcr.io` 换成下表的加速域名，拉完再 `tag` 回原名——这样 `docker-compose.yml` 一行都不用改：
-
-| 加速源 | 域名 | 特点 |
-|:--|:--|:--|
-| **南京大学开源镜像站**（首选） | `ghcr.nju.edu.cn` | 高校公益源，稳定，免注册 |
-| 毫秒镜像 | `ghcr.1ms.run` | 免费公开，延迟低；节点有 IP 轮询，偶发抖动 |
-| DaoCloud 公共加速 | `ghcr.m.daocloud.io` | 同时支持 dockerhub / gcr / quay，大镜像缓存稍慢 |
-
-```bash
-# 以南京大学源为例（毫秒 / DaoCloud 同理，替换域名即可）
-docker pull ghcr.nju.edu.cn/sushazhi/trpanel:latest
-docker tag  ghcr.nju.edu.cn/sushazhi/trpanel:latest ghcr.io/sushazhi/trpanel:latest
-```
-
-> ⚠️ **`daemon.json` 的 `registry-mirrors` 只对 `docker.io` 生效**，把上面的域名填进去**不会**加速 ghcr——Docker 客户端压根不查它（`docker info` 会显示，但拉取仍走官方源）。
-> 这些源都是**缓存式**代理：刚发布的新镜像首次拉取可能报 `manifest unknown`，等缓存同步或换一个源重试即可。三方源由高校 / 社区维护，可用性会变；长期稳定方案是把镜像同步到自己的阿里云 ACR 或腾讯云 TCR。
-
-<details>
-<summary><b>containerd / K8s：域名分流（全局生效，集群适用）</b></summary>
-
-```bash
-sudo mkdir -p /etc/containerd/certs.d/ghcr.io
-sudo tee /etc/containerd/certs.d/ghcr.io/hosts.toml <<'EOF'
-server = "https://ghcr.io"
-
-[host."https://ghcr.nju.edu.cn"]
-  capabilities = ["pull", "resolve"]
-EOF
-sudo systemctl restart containerd
-```
-
-配置后集群 YAML 里的镜像地址无需改动，containerd 访问 `ghcr.io` 时自动转到加速节点。
-</details>
-
 ### 📦 方式二：二进制 / 源码构建
 
 #### 1️⃣ 获取程序

@@ -358,7 +358,8 @@ export default function App() {
     : `calc(var(--shell-gap) * 2 + var(--safe-left) + ${sidebarWidth}px)`
 
   return (
-    <div ref={shellRef} className="tm-shell h-full w-full text-gray-800 dark:text-gray-100" style={{ height: '100dvh' }}>
+    <>
+      <div ref={shellRef} className="tm-shell h-full w-full text-gray-800 dark:text-gray-100" style={{ height: '100dvh' }}>
       {/* 内容层：全出血，列表从屏幕顶端开始滚动，才会真正穿过停靠玻璃 */}
       <div className="tm-content" style={{ left: contentLeft }} ref={dropRef}>
         {dragOver && (
@@ -449,12 +450,6 @@ export default function App() {
       <ConfirmHost />
       {/* 系统 chrome 颜色跟随品牌预设，否则 PWA 下顶栏色带断层会破坏玻璃延伸感 */}
       <ThemeColors />
-      <Toaster
-        position="top-center"
-        offset={{ top: 'calc(var(--pad-top) + 8px)' }}
-        mobileOffset={{ top: 'calc(var(--pad-top) + 8px)' }}
-        toastOptions={{ classNames: { toast: 'tm-toast' } }}
-      />
 
       {/* 批量打标签（覆盖 / 添加 / 移除 三种模式） */}
       <Dialog open={labelModalOpen} onOpenChange={setLabelModalOpen}>
@@ -521,6 +516,15 @@ export default function App() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+      {/* Toaster 必须挂在 .tm-shell 之外：shell 是 z-index:1 的层叠上下文，
+          弹窗遮罩是 body 级 z-50 portal，留在 shell 里所有 toast 都会被弹窗盖住（如复制反馈） */}
+      <Toaster
+        position="top-center"
+        offset={{ top: 'calc(var(--pad-top) + 8px)' }}
+        mobileOffset={{ top: 'calc(var(--pad-top) + 8px)' }}
+        toastOptions={{ classNames: { toast: 'tm-toast' } }}
+      />
+    </>
   )
 }

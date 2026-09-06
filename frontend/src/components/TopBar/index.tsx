@@ -32,6 +32,7 @@ import { DEMO_MODE } from '@/demo'
 import { cn, cssVars } from '@/lib/utils'
 import { tagColor } from '@/utils/tagColor'
 import { toast } from '@/lib/toast'
+import { copyText } from '@/utils/clipboard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -161,8 +162,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
     const picked = await pickFolder()
     // 取消或宿主没返回：与设置面板、种子菜单的选择器一致，不打扰
     if (!picked) return
-    navigator.clipboard?.writeText(picked).catch(() => {})
-    toast.success(t('sidebar.dirCopied', { dir: picked }))
+    void copyText(picked).then((ok) => { if (ok) toast.success(t('sidebar.dirCopied', { dir: picked })) })
   }
 
   // 搜索框是压扁而非卸载，光标否则会留在看不见的输入框里

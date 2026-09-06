@@ -12,6 +12,7 @@ import { useRevealPath } from '@/hooks/useRevealPath'
 import { usePlatform } from '@/platform'
 import { RemoveTorrentDialog, ReplaceTrackerDialog } from '@/components/ToolsDialogs'
 import { mapPath } from '@/utils/pathMapping'
+import { copyText } from '@/utils/clipboard'
 import { toast } from '@/lib/toast'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ProgressBar } from '@/components/TorrentList/ProgressBar'
@@ -107,6 +108,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
 
   const handleMenuClick = (torrent: Torrent) => (key: string) => {
     const id = torrent.id
+    const reportCopy = (ok: boolean) => (ok ? toast.success(t('toast.copied')) : toast.error(t('toast.copyFailed')))
     if (key === 'start') actions.singleStart(id)
     else if (key === 'startNow') actions.singleStartNow(id)
     else if (key === 'stop') actions.singleStop(id)
@@ -119,9 +121,9 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
     else if (key === 'trackers') setEditTarget({ torrent, mode: 'trackers' })
     else if (key === 'replaceTrackers') setTrackerOpen(true)
     else if (key.startsWith('queue:')) actions.queue(id, key.split(':')[1] as 'top' | 'up' | 'down' | 'bottom')
-    else if (key === 'copyMagnet') { void navigator.clipboard?.writeText(torrent.magnetLink).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
-    else if (key === 'copyName') { void navigator.clipboard?.writeText(torrent.name).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
-    else if (key === 'copyPath') { void mapPath(torrent.downloadDir).then((p) => navigator.clipboard?.writeText(p)).catch(() => {}).finally(() => toast.success(t('toast.copied'))) }
+    else if (key === 'copyMagnet') void copyText(torrent.magnetLink).then(reportCopy)
+    else if (key === 'copyName') void copyText(torrent.name).then(reportCopy)
+    else if (key === 'copyPath') void mapPath(torrent.downloadDir).then(copyText).then(reportCopy)
     else if (key === 'remove') setRemoveIds([id])
     else if (key === 'openDir') { void revealPath(torrent.downloadDir || '') }
     else if (key === 'deleteCompleted') onOpenBatchClean?.()
@@ -241,26 +243,31 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                     )}
                   </div>
 
-                  {/* 元信息：下行 / 上行 / 分享率 / 做种时长（未完成时为剩余时间）。
-                      移动端 space-between 铺满整行（跨度再宽也不挤在左边），桌面保持左聚；
-                      手机上放不下时允许折行（全 shrink-0 + nowrap 会整行溢出被裁掉，做种时长就看不见了） */}
-                  <div className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-0.5 text-footnote text-gray-500 dark:text-gray-400 mt-1 min-w-0 overflow-hidden md:justify-start">
-                    <span className="tm-mono shrink-0 text-green-600 dark:text-green-400">↓{formatSpeed(torrent.rateDownload)}</span>
-                    <span className="tm-mono shrink-0 text-blue-600 dark:text-blue-400">↑{formatSpeed(torrent.rateUpload)}</span>
-                    <Sep />
-                    <span className="tm-mono shrink-0">{t('columns.ratio')} {formatRatio(torrent.uploadRatio)}</span>
-                    {seedingFor && (
-                      <>
-                        <Sep />
-                        <span className="shrink-0 text-gray-400 dark:text-gray-500">{seedingFor}</span>
-                      </>
-                    )}
-                    {eta && (
-                      <>
-                        <Sep />
-                        <span className="shrink-0 truncate">{eta}</span>
-                      </>
-                    )}
+                  {/* 元信息：下行 / 上行 · 分享率 · 做种/剩余 —— 始终一整行（flex-nowrap），
+                      整行靠左紧凑排列：速度与分享率之间不留伸缩空白，相邻卡片不会有的折行有的不折行。
+                      窄屏下字号降一档、间隔收紧；真塞不下时只允许最右侧的做种/剩余段省略号截断，
+                      分享率永远完整 */}
+                  <div className="flex flex-nowrap items-center gap-x-1.5 md:gap-x-2.5 text-caption1 md:text-footnote text-gray-500 dark:text-gray-400 mt-1 min-w-0 overflow-hidden">
+                    <span className="shrink-0 inline-flex items-center gap-x-1.5 md:gap-x-2.5">
+                      <span className="tm-mono text-green-600 dark:text-green-400">↓{formatSpeed(torrent.rateDownload)}</span>
+                      <span className="tm-mono text-blue-600 dark:text-blue-400">↑{formatSpeed(torrent.rateUpload)}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-x-1.5 md:gap-x-2.5 min-w-0">
+                      <Sep />
+                      <span className="tm-mono shrink-0">{t('columns.ratio')} {formatRatio(torrent.uploadRatio)}</span>
+                      {seedingFor && (
+                        <>
+                          <Sep />
+                          <span className="text-gray-400 dark:text-gray-500 truncate min-w-0">{seedingFor}</span>
+                        </>
+                      )}
+                      {eta && (
+                        <>
+                          <Sep />
+                          <span className="truncate min-w-0">{eta}</span>
+                        </>
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>

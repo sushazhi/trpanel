@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { usePlatform } from '@/platform'
 import { toast } from '@/lib/toast'
 import { mapPath } from '@/utils/pathMapping'
+import { copyText } from '@/utils/clipboard'
 
 /**
  * 在宿主文件管理器中定位目录。
@@ -19,7 +20,7 @@ export function useRevealPath() {
       if (!path) return
       const local = await mapPath(path)
       if (await revealPath(local)) return
-      navigator.clipboard?.writeText(local).catch(() => {})
+      void copyText(local)
       toast.info(t('sidebar.openDirFallback', { dir: local }))
     },
     [revealPath, t],

@@ -77,42 +77,22 @@ export function ListControls({ compact, isMobile, onOpenDashboard, onOpenCreate 
       {/* 排序 */}
       <Popover open={sortOpen} onOpenChange={setSortOpen}>
         <PopoverTrigger asChild>
-          {compact ? (
-            <button
-              className={cn(
-                iconBtn,
-                'flex items-center justify-center transition-colors',
-                sortField !== 'name'
-                  ? 'text-primary bg-primary/10'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-white/10',
-              )}
-              title={`${t('filter.sortBy')}: ${t(`filter.sort.${sortField}`)}`}
-            >
-              {sortField === 'name' ? (
-                <ArrowUpDown className={iconSize} />
-              ) : (
-                <ArrowDownUp className={cn(iconSize, sortOrder === 'asc' ? 'rotate-0' : 'rotate-180')} />
-              )}
-            </button>
-          ) : (
-            <button
-              className={cn(
-                big ? 'h-11 px-3' : 'h-8 px-2.5',
-                'rounded-lg text-footnote flex items-center gap-1.5 transition-colors',
-                sortField !== 'name'
-                  ? 'text-primary bg-primary/10'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-white/10',
-              )}
-            >
-              {sortField === 'name' ? (
-                <ArrowUpDown className="w-3.5 h-3.5 opacity-50" />
-              ) : (
-                <ArrowDownUp className={cn('w-3.5 h-3.5', sortOrder === 'asc' ? 'rotate-0' : 'rotate-180')} />
-              )}
-              <span>{t('filter.sortBy')}: </span>
-              <span className="font-medium">{t(`filter.sort.${sortField}`)}</span>
-            </button>
-          )}
+          <button
+            className={cn(
+              iconBtn,
+              'flex items-center justify-center transition-colors',
+              sortField !== 'name'
+                ? 'text-primary bg-primary/10'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-white/10',
+            )}
+            title={`${t('filter.sortBy')}: ${t(`filter.sort.${sortField}`)}`}
+          >
+            {sortField === 'name' ? (
+              <ArrowUpDown className={iconSize} />
+            ) : (
+              <ArrowDownUp className={cn(iconSize, sortOrder === 'asc' ? 'rotate-0' : 'rotate-180')} />
+            )}
+          </button>
         </PopoverTrigger>
         <PopoverContent className="glass-panel-strong p-1 w-40" align="end">
           <div className="space-y-0.5">
@@ -205,10 +185,10 @@ export function ListHeader({ count, isMobile, onOpenDashboard, onOpenCreate }: {
 
   return (
     <div className="tm-dock glass-panel rounded-dock h-11 px-4 flex items-center gap-3">
-      {/* 标题 + 计数 */}
+      {/* 标题 + 计数：分类标题优先，空间不足先压缩计数（真机窄屏曾出现标题被挤没、只剩计数） */}
       <div className="flex items-baseline gap-2 min-w-0">
-        <span className="text-subhead font-semibold text-gray-800 dark:text-gray-100 truncate">{t(titleKey)}</span>
-        <span className="text-footnote text-gray-400 tm-mono shrink-0">({count})</span>
+        <span className="text-subhead font-semibold text-gray-800 dark:text-gray-100 whitespace-nowrap shrink-0">{t(titleKey)}</span>
+        <span className="text-footnote text-gray-400 tm-mono truncate min-w-0">{`(${count})`}</span>
       </div>
 
       <div className="ml-auto flex items-center gap-1.5 shrink-0">

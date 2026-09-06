@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,11 @@ func (h *Handler) getSettings(c *gin.Context) {
 	if t := h.mcp.Token.Load(); t != nil {
 		mcpToken = *t
 	}
+	// "0" 与空等价（不启用直连端口），统一按空回显，避免前端把它当有效端口拼地址
+	mcpPort := h.mcpPort
+	if mcpPort == "0" {
+		mcpPort = ""
+	}
 	respond(c, gin.H{
 		"url":               url,
 		"user":              user,
@@ -27,7 +33,7 @@ func (h *Handler) getSettings(c *gin.Context) {
 		"mcpAllowDelete":    h.mcp.AllowDelete.Load(),
 		"mcpAllowDangerous": h.mcp.AllowDangerous.Load(),
 		"mcpToken":          mcpToken,
-		"mcpPort":           h.mcpPort,
+		"mcpPort":           mcpPort,
 	})
 }
 
@@ -43,12 +49,13 @@ func (h *Handler) updateSettings(c *gin.Context) {
 		MCPAllowDelete    *bool   `json:"mcpAllowDelete"`
 		MCPAllowDangerous *bool   `json:"mcpAllowDangerous"`
 		MCPToken          *string `json:"mcpToken"`
+		MCPPort           *string `json:"mcpPort"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
 		return
 	}
-	if body.URL == "" && body.MCPEnabled == nil && body.MCPAllowDelete == nil && body.MCPAllowDangerous == nil && body.MCPToken == nil {
+	if body.URL == "" && body.MCPEnabled == nil && body.MCPAllowDelete == nil && body.MCPAllowDangerous == nil && body.MCPToken == nil && body.MCPPort == nil {
 		respondError(c, http.StatusBadRequest, "没有要保存的设置")
 		return
 	}
@@ -57,6 +64,15 @@ func (h *Handler) updateSettings(c *gin.Context) {
 		if err := config.ValidateEnvValue("接入令牌", *body.MCPToken); err != nil {
 			respondError(c, http.StatusBadRequest, err.Error())
 			return
+		}
+	}
+	if body.MCPPort != nil {
+		*body.MCPPort = strings.TrimSpace(*body.MCPPort)
+		if *body.MCPPort != "" {
+			if p, err := strconv.Atoi(*body.MCPPort); err != nil || p < 1 || p > 65535 {
+				respondError(c, http.StatusBadRequest, "MCP 直连端口必须是 1-65535 的端口号")
+				return
+			}
 		}
 	}
 
@@ -131,6 +147,10 @@ func (h *Handler) updateSettings(c *gin.Context) {
 			h.mcp.Token.Store(&t)
 		}
 	}
+	// 端口无法热应用（监听器随进程启动绑定），仅更新内存值供回显，重启后生效
+	if body.MCPPort != nil {
+		h.mcpPort = *body.MCPPort
+	}
 
 	// 持久化到数据目录的 .env.local：未提交的类目沿用当前生效值
 	url, user, pass := body.URL, body.User, body.Pass
@@ -154,6 +174,7 @@ func (h *Handler) updateSettings(c *gin.Context) {
 		MCPAllowDelete:    h.mcp.AllowDelete.Load(),
 		MCPAllowDangerous: h.mcp.AllowDangerous.Load(),
 		MCPToken:          mcpToken,
+		MCPPort:           h.mcpPort,
 	}); err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
