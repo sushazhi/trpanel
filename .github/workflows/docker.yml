@@ -104,9 +104,12 @@ jobs:
             printf '%s\n' "${images}"
             echo 'EOF'
             echo 'outputs<<EOF'
-            # by-digest 推送只需仓库名（逗号分隔），tag 由 merge job 用 imagetools 统一打
+            # by-digest 推送只需仓库名（逗号分隔），tag 由 merge job 用 imagetools 统一打。
+            # 注意：provenance 必须靠 action 的 provenance 输入关闭（见下方构建步骤），
+            # 写进 outputs 里的 provenance=false 对 image exporter 无效，仍会生成
+            # attestation 清单，最终在 GHCR 上多出一条 unknown/unknown
             names=$(printf '%s\n' "${images}" | paste -sd, -)
-            printf 'type=image,"name=%s",push-by-digest=true,name-canonical=true,push=true,provenance=false\n' "${names}"
+            printf 'type=image,"name=%s",push-by-digest=true,name-canonical=true,push=true\n' "${names}"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -172,6 +175,9 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: ${{ steps.repos.outputs.outputs }}
+          # 关闭 provenance attestation：否则每个架构的 by-digest 产物会多带一个
+          # unknown/unknown 的证明清单，merge 后 latest 里会出现第三个「架构」
+          provenance: false
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
