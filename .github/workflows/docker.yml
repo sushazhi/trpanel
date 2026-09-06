@@ -86,9 +86,9 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # 生成镜像列表：GHCR 一定有，Docker Hub 仅在配置了 secrets 时追加
-      # 同时生成 by-digest 推送用的 outputs：每个仓库必须是一条完整的
-      # `type=image,name=...`，不能把多行 tags 直接塞进 name（action 会按换行
-      # 拆成多个 --output，除第一条外都是非法值）
+      # 同时生成 by-digest 推送用的 outputs。多仓库只能写成**同一条** output 里的
+      # 逗号分隔 name（type=image,"name=a,b"）：写成多个 --output 时 buildx 只生效
+      # 最后一个，其余仓库收不到推送，merge 阶段会报 "<repo>@sha256:... not found"
       - name: 解析目标仓库
         id: repos
         env:
@@ -104,11 +104,9 @@ jobs:
             printf '%s\n' "${images}"
             echo 'EOF'
             echo 'outputs<<EOF'
-            # by-digest 推送只需仓库名，tag 由 merge job 用 imagetools 统一打
-            while IFS= read -r img; do
-              [ -n "${img}" ] || continue
-              printf 'type=image,name=%s,push-by-digest=true,name-canonical=true,push=true,provenance=false\n' "${img}"
-            done <<< "${images}"
+            # by-digest 推送只需仓库名（逗号分隔），tag 由 merge job 用 imagetools 统一打
+            names=$(printf '%s\n' "${images}" | paste -sd, -)
+            printf 'type=image,"name=%s",push-by-digest=true,name-canonical=true,push=true,provenance=false\n' "${names}"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
