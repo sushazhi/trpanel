@@ -202,7 +202,12 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
-                        <Checkbox checked={selected} onCheckedChange={() => { toggleSelect(torrent.id); setSelectAnchor(torrent.id) }} />
+                        {/* 触屏：圆形选择圈，与卡片的圆角/⋮ 圆按钮同一设计语言（桌面表格仍用方角） */}
+                        <Checkbox
+                          checked={selected}
+                          onCheckedChange={() => { toggleSelect(torrent.id); setSelectAnchor(torrent.id) }}
+                          className={(isMobile || isCoarse) ? 'rounded-full' : undefined}
+                        />
                       </span>
                     )}
                     {/* ⋮ 菜单（触屏设备显示；鼠标设备用右键菜单） */}

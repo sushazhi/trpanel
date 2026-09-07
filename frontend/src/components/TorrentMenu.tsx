@@ -211,6 +211,8 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
     setStyle({
       left: Math.min(Math.max(M, flipX), Math.max(M, vw - rect.width - M)),
       top: Math.min(Math.max(M, flipY), Math.max(M, vh - rect.height - M)),
+      // 入场缩放从长按落点长出：未翻转的方向取贴近落点的一侧为原点
+      transformOrigin: `${flipX === pos.x ? 'left' : 'right'} ${flipY === pos.y ? 'top' : 'bottom'}`,
     })
   }, [pos])
 
@@ -242,7 +244,8 @@ export function FloatingContextMenu({ pos, items, onPick, onClose }: {
       onPointerDown={(e) => e.stopPropagation()}
       // pointer-events-auto：Radix 弹层（Sheet/Dialog）打开期间会给 body 设 pointer-events:none
       // 防滚动穿透，portal 到 body 的本菜单会继承到；不显式恢复的话整个菜单点不到、误触底下层
-      className="tm-ctx pointer-events-auto fixed z-[100] glass-panel-strong min-w-44 max-h-[80dvh] overflow-y-auto overscroll-contain rounded-xl p-1"
+      // animate-tm-pop-in：此前瞬开瞬闭，与 Radix 弹层的 pop 语言不齐；缩放原点由上方 effect 按落点写入
+      className="tm-ctx pointer-events-auto fixed z-[100] glass-panel-strong min-w-44 max-h-[80dvh] overflow-y-auto overscroll-contain rounded-xl p-1 animate-tm-pop-in"
       style={style}
     >
       {items.map((item, idx) => {

@@ -136,6 +136,12 @@
   --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
+  /* 全局过渡默认值：所有未显式声明 ease 的 transition-* 工具类（transition-colors/all/
+     transform/opacity 等，全站 50+ 处）此前走 Tailwind 默认 cubic-bezier(0.4,0,0.2,1)，
+     与动效令牌脱节。统一收敛到 --ease-standard，时长维持 150ms 微交互档。 */
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: var(--ease-standard);
+
   /* 状态语义色：全站唯一来源（utils/status.ts 只映射键名，色值留在 CSS）。
      下载族刻意挂在 --color-primary 上，切主题预设时才跟着一起变；
      做种/校验/隔离是跨主题恒定的信号色，不跟随品牌色。 */

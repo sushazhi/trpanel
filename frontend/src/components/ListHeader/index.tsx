@@ -1,12 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowDownUp, ArrowUpDown, BarChart3, FilePlus2, LayoutGrid, LayoutList, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { torrentApi } from '@/api/torrent'
 import { useAppStore } from '@/stores/appStore'
 import { useResponsive } from '@/hooks/useResponsive'
+import { matchesStatus } from '@/hooks/useFilter'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { STATUS_ITEMS } from '@/components/Sidebar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import type { Torrent } from '@/types'
 
 const STATUS_LABEL: Record<string, string> = {
   all: 'nav.all',
@@ -18,6 +21,19 @@ const STATUS_LABEL: Record<string, string> = {
   paused: 'nav.paused',
   verifying: 'nav.verifying',
   error: 'nav.error',
+}
+
+// 移动端标题栏用的状态分组计数（与侧边栏同源：STATUS_ITEMS + matchesStatus）
+export function statusCountsFor(torrents: Torrent[], matchesStatus: (t: Torrent, s: string) => boolean) {
+  const counts: Record<string, number> = { all: torrents.length }
+  for (const tr of torrents) {
+    for (const item of STATUS_ITEMS) {
+      if (item.key !== 'all' && matchesStatus(tr, item.key)) {
+        counts[item.key] = (counts[item.key] ?? 0) + 1
+      }
+    }
+  }
+  return counts
 }
 
 const SORT_OPTIONS = [
@@ -176,20 +192,90 @@ export function ListControls({ compact, isMobile, onOpenDashboard, onOpenCreate 
   )
 }
 
-// 主区标题栏：分类标题 + 计数 + 排序/视图/刷新（仅移动端渲染）
+// 主区标题栏：分类标题（点击下拉切换状态分组）+ 计数 + 排序/视图/刷新（仅移动端渲染）
 export function ListHeader({ count, isMobile, onOpenDashboard, onOpenCreate }: { count: number; isMobile?: boolean; onOpenDashboard?: () => void; onOpenCreate?: () => void }) {
   const { t } = useTranslation()
   const filters = useAppStore((s) => s.filters)
+  const setFilters = useAppStore((s) => s.setFilters)
+  const torrents = useAppStore((s) => s.torrents)
+  const statusFilterVisible = useAppStore((s) => s.statusFilterVisible)
   const activeStatus = filters.status[0] || 'all'
   const titleKey = STATUS_LABEL[activeStatus] ?? 'nav.all'
+  const [statusOpen, setStatusOpen] = useState(false)
+
+  // 各状态分组计数：与侧边栏/移动抽屉同源（STATUS_ITEMS + matchesStatus）
+  const statusCounts = useMemo(() => statusCountsFor(torrents, matchesStatus), [torrents])
+  const visibleItems = STATUS_ITEMS.filter(
+    (item) => item.key === 'all' || statusFilterVisible[item.key] !== false,
+  )
+
+  const pickStatus = (key: string) => {
+    setFilters({ status: key === 'all' ? ['all'] : [key] })
+    setStatusOpen(false)
+  }
 
   return (
     <div className="tm-dock glass-panel rounded-dock h-11 px-4 flex items-center gap-3">
-      {/* 标题 + 计数：分类标题优先，空间不足先压缩计数（真机窄屏曾出现标题被挤没、只剩计数） */}
-      <div className="flex items-baseline gap-2 min-w-0">
-        <span className="text-subhead font-semibold text-gray-800 dark:text-gray-100 whitespace-nowrap shrink-0">{t(titleKey)}</span>
-        <span className="text-footnote text-gray-400 tm-mono truncate min-w-0">{`(${count})`}</span>
-      </div>
+      {/* 标题 + 计数：点击展开状态分组下拉，快速切换分类 */}
+      <Popover open={statusOpen} onOpenChange={setStatusOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('nav.filter')}
+            className="flex items-center min-w-0 min-h-11 -my-1 -ml-1 pl-1 pr-1.5 rounded-lg transition-colors hover:bg-white/60 dark:hover:bg-white/10 active:bg-white/80 dark:active:bg-white/15"
+          >
+            {/* 文字基线对齐由内层负责：按钮自身 44pt 高，直接 baseline 会把文字锚到顶部而偏上 */}
+            <span className="flex items-baseline gap-1.5 min-w-0">
+              <span className="text-subhead font-semibold text-gray-800 dark:text-gray-100 whitespace-nowrap shrink-0">{t(titleKey)}</span>
+              <span className="text-footnote text-gray-400 tm-mono truncate min-w-0">{`(${count})`}</span>
+            </span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="glass-panel-strong p-1 w-44" align="start">
+          <div className="space-y-0.5">
+            {visibleItems.map((item) => {
+              const Icon = item.icon
+              const isActive = activeStatus === item.key
+              const groupCount = statusCounts[item.key] ?? 0
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => pickStatus(item.key)}
+                  className={cn(
+                    'w-full flex items-center gap-2.5 px-2.5 rounded-lg text-footnote transition-colors min-h-11',
+                    isActive
+                      ? 'bg-primary/15 text-primary font-medium'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-white/10',
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      'w-4 h-4 shrink-0',
+                      isActive
+                        ? 'text-primary'
+                        : item.key === 'error' && groupCount > 0
+                          ? 'text-red-500'
+                          : 'text-gray-500 dark:text-gray-400',
+                    )}
+                  />
+                  <span className="flex-1 text-left truncate">{t(item.label)}</span>
+                  <span
+                    className={cn(
+                      'min-w-5 h-5 px-1.5 rounded-full text-caption2 tm-mono flex items-center justify-center',
+                      isActive
+                        ? 'bg-primary/15 text-primary'
+                        : 'bg-white/70 dark:bg-white/10 text-gray-500 dark:text-gray-400',
+                      item.key === 'error' && groupCount > 0 && !isActive && 'bg-red-500 text-white',
+                    )}
+                  >
+                    {groupCount}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
 
       <div className="ml-auto flex items-center gap-1.5 shrink-0">
         <ListControls isMobile onOpenDashboard={onOpenDashboard} onOpenCreate={onOpenCreate} />

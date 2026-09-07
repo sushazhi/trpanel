@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { Eraser, FolderOpen, Magnet, Pause, Play, Plus } from 'lucide-react'
+import { Eraser, FolderOpen, Pause, Play, Plus, Settings, Sprout } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '@/stores/appStore'
 import { useHideOnScroll } from '@/hooks/useHideOnScroll'
@@ -12,6 +12,7 @@ interface Props {
   isMobile?: boolean
   onOpenAdd: () => void
   onOpenClean: () => void
+  onOpenSettings?: () => void
   /** 主内容列：其中任何滚动发生都暂时收起胶囊 */
   scrollHost?: RefObject<HTMLElement | null>
 }
@@ -26,7 +27,7 @@ interface Props {
  * 净空都按整条列表的宽度生效，为一颗圆钮让出全宽空带不值。让位靠
  * useHideOnScroll——滑动期间整块玻璃下滑出屏，静止时才浮在列表上。
  */
-export function FloatingBar({ isMobile, onOpenAdd, onOpenClean, scrollHost }: Props) {
+export function FloatingBar({ isMobile, onOpenAdd, onOpenClean, onOpenSettings, scrollHost }: Props) {
   const { t } = useTranslation()
   const torrents = useAppStore((s) => s.torrents)
   const downloadDir = useAppStore((s) => s.session?.downloadDir)
@@ -70,7 +71,7 @@ export function FloatingBar({ isMobile, onOpenAdd, onOpenClean, scrollHost }: Pr
 
   const size = isMobile ? 'h-11' : 'h-10'
   const items = [
-    { key: 'add', label: t('topbar.addTask'), icon: Magnet, run: onOpenAdd },
+    { key: 'add', label: t('topbar.addTask'), icon: Sprout, run: onOpenAdd },
     {
       key: 'toggleAll',
       label: hasActive ? t('action.pauseAll') : t('action.startAll'),
@@ -79,6 +80,7 @@ export function FloatingBar({ isMobile, onOpenAdd, onOpenClean, scrollHost }: Pr
     },
     { key: 'openDir', label: t('action.openDownloadDir'), icon: FolderOpen, run: () => void openDir(), disabled: !downloadDir },
     { key: 'clean', label: t('batchClean.title'), icon: Eraser, run: onOpenClean, disabled: !hasCompleted },
+    ...(onOpenSettings ? [{ key: 'settings', label: t('common.settings'), icon: Settings, run: onOpenSettings }] : []),
   ]
   // 「打开下载目录」需要宿主文件管理器能力，不支持时隐藏（与种子右键菜单保持一致）
   const visibleItems = can('fs.revealPath') ? items : items.filter((i) => i.key !== 'openDir')

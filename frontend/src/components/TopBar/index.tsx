@@ -317,7 +317,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
           <Popover open={avatarOpen} onOpenChange={setAvatarOpen}>
             <PopoverTrigger asChild>
               <button
-                className="h-11 w-11 sm:h-10 sm:w-10 rounded-full bg-gradient-to-br from-[var(--brand-grad-to)] to-[var(--brand-grad-from)] text-white text-body font-semibold flex items-center justify-center shadow-md hover:scale-105 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white/70 dark:focus-visible:ring-offset-gray-900"
+                className="h-11 w-11 sm:h-10 sm:w-10 rounded-full bg-gradient-to-br from-[var(--brand-grad-to)] to-[var(--brand-grad-from)] text-white text-body font-semibold flex items-center justify-center shadow-md hover:scale-105 transition-transform duration-[220ms] [transition-timing-function:var(--ease-spring)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white/70 dark:focus-visible:ring-offset-gray-900"
                 aria-label={t('topbar.quickSettings')}
               >
                 {language === 'zh' ? '中' : 'EN'}
@@ -351,7 +351,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
                       title={t(`theme.preset.${p.id}`)}
                       aria-label={t(`theme.preset.${p.id}`)}
                       className={cn(
-                        'w-8 h-8 rounded-full flex items-center justify-center transition-transform hover:scale-110 active:scale-90',
+                        'w-8 h-8 rounded-full flex items-center justify-center transition-transform duration-[220ms] [transition-timing-function:var(--ease-spring)] hover:scale-110 active:scale-90',
                         themePreset === p.id && 'ring-2 ring-offset-2 ring-offset-white/80 dark:ring-offset-gray-900',
                       )}
                       style={{
