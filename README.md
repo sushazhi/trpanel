@@ -13,7 +13,8 @@
 [![fnOS](https://img.shields.io/badge/Optimized%20for-fnOS-FF6B35?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
 [![Release](https://img.shields.io/badge/release-v0.1.0-blue?style=flat-square)](../../releases)
-[![Docker](https://img.shields.io/badge/GHCR-trpanel-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/sushazhi/trpanel/pkgs/container/trpanel)
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-jianhuayanyu%2Ftrpanel-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/jianhuayanyu/trpanel)
+[![GHCR](https://img.shields.io/badge/GHCR-trpanel-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/sushazhi/trpanel/pkgs/container/trpanel)
 [![在线预览](https://img.shields.io/badge/在线预览-Demo-8A2BE2?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyQTEwIDEwIDAgMSAwIDIyIDEyIDEwIDEwIDAgMCAwIDEyIDJ6bTAgMmE4IDggMCAxIDEgOCA4IDggOCAwIDEgLTggOHptLTEtMTJ2NGw0LTQtNC00eiIvPjwvc3ZnPg==)](https://sushazhi.github.io/trpanel/)
 
 </div>
@@ -97,7 +98,7 @@ docker run -d --name trpanel \
   -e TR_URL=http://host.docker.internal:9091/transmission/rpc \
   -e API_TOKEN=change-me \
   -v trpanel-data:/data \
-  ghcr.io/sushazhi/trpanel:latest
+  jianhuayanyu/trpanel:latest
 ```
 
 也可以直接用仓库自带的 [`docker-compose.yml`](docker-compose.yml)：
@@ -108,14 +109,15 @@ API_TOKEN=change-me docker compose up -d
 
 | 项 | 值 |
 |:--|:--|
-| 镜像 | `ghcr.io/sushazhi/trpanel` |
+| 镜像 | `jianhuayanyu/trpanel`（Docker Hub，推荐）／`ghcr.io/sushazhi/trpanel`（GHCR） |
 | 架构 | `linux/amd64`、`linux/arm64` |
 | 标签 | `v1.2.3`（与仓库 Git 标签完全一致）、`latest`（当前最新版本的镜像） |
 | 数据卷 | `/data`（即 `TM_DATA_DIR`，存放 `tm-state.json` 与界面保存的连接配置） |
 | 健康检查 | `GET /` 每 30s |
 
 > ⚠️ 容器内 `SERVER_HOST=0.0.0.0`，**未设置 `API_TOKEN` 时服务会拒绝启动**（防止局域网裸奔）；令牌在浏览器首次访问时粘贴一次即可，之后持久化在本地。
-> 镜像由 [Docker 工作流](.github/workflows/docker.yml)自动构建发布：仅推送 `v*` 标签触发多架构构建；PR 只验证构建不推送。GHCR 包首次发布后需在仓库 **Packages → Package settings** 中把可见性改为 Public，才能匿名拉取。
+> 镜像由 [Docker 工作流](.github/workflows/docker.yml)自动构建发布：仅推送 `v*` 标签触发多架构构建；PR 只验证构建不推送。同一次构建会同时推送到 Docker Hub 与 GHCR，**两个仓库的镜像内容完全一致**，拉取哪个都行（Docker Hub 在国内通常更快）。
+> GHCR 包首次发布后需在仓库 **Packages → Package settings** 中把可见性改为 Public，才能匿名拉取；Docker Hub 推送需在仓库 Secrets 中配置 `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`（目标仓库默认为 `jianhuayanyu/trpanel`，可用仓库变量 `DOCKERHUB_REPO` 覆盖）。
 
 ### 📦 方式二：二进制 / 源码构建
 
@@ -419,7 +421,7 @@ trpanel/
 ├── docker-compose.yml                # 容器部署示例
 ├── .github/workflows/
 │   ├── release.yml                   # 打 v* 标签时交叉编译并发布 Release
-│   └── docker.yml                    # 构建并发布多架构镜像（GHCR，可选 Docker Hub）
+│   └── docker.yml                    # 构建并发布多架构镜像（GHCR + Docker Hub）
 ├── backend/                          # Go 后端（单二进制）
 │   ├── cmd/
 │   │   ├── server/                   # 入口（解析平台 + 组装服务）

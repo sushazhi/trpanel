@@ -6,7 +6,9 @@
 
 services:
   trpanel:
-    image: ghcr.io/sushazhi/trpanel:latest
+    # 两个仓库内容一致（同一次 CI 构建推送）：Docker Hub 国内拉取更快
+    image: jianhuayanyu/trpanel:latest
+    # image: ghcr.io/sushazhi/trpanel:latest
     container_name: trpanel
     restart: unless-stopped
     ports:
