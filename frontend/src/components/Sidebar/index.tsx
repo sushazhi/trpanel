@@ -614,7 +614,10 @@ export const DesktopSidebar: React.FC = () => {
 
           {/* 站点 */}
           {sidebarMenuVisible.sites && (
-            <div className="flex-1 min-h-0">
+            // shrink-0 与其他分组同口径：作为普通块参与侧栏整体滚动。
+            // 不能用 flex-1 min-h-0——空间不足时容器被压缩，而列表仍固定 max-h，
+            // 溢出部分会被停靠面板 overflow-hidden 裁掉，表现为“滚不动、看不到站点”
+            <div className="shrink-0">
               <SiteNav
                 sites={torrentSites}
                 siteStats={siteStats}

@@ -79,7 +79,8 @@ export function matchesStatus(t: Torrent, s: string): boolean {
     case 'all':
       return true
     case 'active':
-      return t.status === 4 || t.status === 6
+      // 活跃 = 实际有传输流量（下载或上传），处于下载/做种状态但没有流量的种子不算
+      return t.rateDownload > 0 || t.rateUpload > 0
     case 'downloading':
       return t.status === 3 || t.status === 4
     case 'seeding':

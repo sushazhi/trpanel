@@ -432,12 +432,17 @@ input[type='range']:disabled::-moz-range-thumb {
 }
 
 /* Refined macOS scrollbars: idle 4px / hover 6px, Firefox thin support, wider on touch */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-gray-400) 45%, transparent) transparent;
-}
-.dark * {
-  scrollbar-color: color-mix(in srgb, var(--color-gray-600) 45%, transparent) transparent;
+/* 标准属性只给 Firefox：Chromium 121+ 里一旦设置 scrollbar-width/scrollbar-color，
+   下面的 ::-webkit-scrollbar 自定义会被整体禁用，回退成系统 overlay 滚动条
+   （滚动瞬间才淡入、很快隐藏，看起来“滚动条迟迟才出现”） */
+@-moz-document url-prefix() {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-gray-400) 45%, transparent) transparent;
+  }
+  .dark * {
+    scrollbar-color: color-mix(in srgb, var(--color-gray-600) 45%, transparent) transparent;
+  }
 }
 ::-webkit-scrollbar {
   width: 8px;
