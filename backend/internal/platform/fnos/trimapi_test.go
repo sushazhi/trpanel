@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,31 +23,15 @@ func newTestClient(srv *httptest.Server, token string) *trimPathClient {
 func TestTrimPathConvertSuccess(t *testing.T) {
 	var gotAuth, gotReq, gotLang, gotAppName string
 	var gotPaths []string
-	var gotPathIsArray bool
+	var gotReqID string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		var req struct {
-			ReqID   string          `json:"reqId"`
-			Req     string          `json:"req"`
-			AppName string          `json:"appName"`
-			Data    json.RawMessage `json:"data"`
-		}
+		var req trimConvertReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("decode request: %v", err)
 			return
 		}
-		var data trimConvertData
-		_ = json.Unmarshal(req.Data, &data)
-		if data.Path == nil {
-			var one trimConvertDataOne
-			_ = json.Unmarshal(req.Data, &one)
-			gotPaths = []string{one.Path}
-			gotPathIsArray = false
-		} else {
-			gotPaths = data.Path
-			gotPathIsArray = true
-		}
-		gotReq, gotLang, gotAppName = req.Req, data.Language, req.AppName
+		gotReq, gotLang, gotPaths, gotAppName, gotReqID = req.Req, req.Data.Language, req.Data.Path, req.AppName, req.ReqID
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"reqId": req.ReqID, "code": 0, "msg": "",
 			"data": []map[string]string{
@@ -71,8 +56,12 @@ func TestTrimPathConvertSuccess(t *testing.T) {
 	if gotLang != "zh-CN" {
 		t.Errorf("language = %q", gotLang)
 	}
-	if !gotPathIsArray || len(gotPaths) != 2 {
-		t.Errorf("去重后应剩 2 个路径且为数组请求，实际 %v (array=%v)", gotPaths, gotPathIsArray)
+	// reqId 必须是纯十进制数字（与宿主/生产客户端一致，避免网关解析异常）
+	if _, err := strconv.ParseInt(gotReqID, 10, 64); err != nil {
+		t.Errorf("reqId 应为十进制数字，实际 %q", gotReqID)
+	}
+	if len(gotPaths) != 2 {
+		t.Errorf("去重后应剩 2 个路径，实际 %d: %v", len(gotPaths), gotPaths)
 	}
 	if m["/vol1/1000/photo"] != "存储空间1/admin 的文件/photo" {
 		t.Errorf("semantic map = %v", m)
@@ -82,95 +71,7 @@ func TestTrimPathConvertSuccess(t *testing.T) {
 	}
 }
 
-// 部分固件对数组 path 请求返回 500：应自动降级为单条字符串请求完成转换
-func TestTrimPathConvertFallbackToSingle(t *testing.T) {
-	var gotBodies []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Data json.RawMessage `json:"data"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		gotBodies = append(gotBodies, string(req.Data))
-		var data trimConvertData
-		if err := json.Unmarshal(req.Data, &data); err == nil && data.Path != nil {
-			// 数组请求：返回 500（模拟问题固件）
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"errno":10236,"errmsg":"internal"}`))
-			return
-		}
-		var one trimConvertDataOne
-		_ = json.Unmarshal(req.Data, &one)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"code": 0,
-			"data": []map[string]string{{"path": one.Path, "semanticPath": "语义/" + one.Path}},
-		})
-	}))
-	defer srv.Close()
-
-	m, err := newTestClient(srv, "tok").Convert(context.Background(), []string{"/vol1/a", "/vol1/b"}, "zh-CN")
-	if err != nil {
-		t.Fatalf("降级后应转换成功: %v", err)
-	}
-	if m["/vol1/a"] != "语义//vol1/a" || m["/vol1/b"] != "语义//vol1/b" {
-		t.Errorf("semantic map = %v", m)
-	}
-	if len(gotBodies) != 3 { // 1 次批量 + 2 次单条
-		t.Errorf("应发起 3 次请求（1 批量 + 2 单条），实际 %d: %v", len(gotBodies), gotBodies)
-	}
-}
-
-// 批量与单条全部失败时应返回错误（前端据此按不可用处理，避免反复重试）
-func TestTrimPathConvertAllFail(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"errno":500,"errmsg":"boom"}`))
-	}))
-	defer srv.Close()
-
-	_, err := newTestClient(srv, "tok").Convert(context.Background(), []string{"/vol1/a"}, "zh-CN")
-	if err == nil || !strings.Contains(err.Error(), "状态码 500") {
-		t.Fatalf("期望错误含 %q，实际 %v", "状态码 500", err)
-	}
-}
-
-// 单条失败时跳过该条，不拖垮其余条目
-func TestTrimPathConvertPartialFail(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Data json.RawMessage `json:"data"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		var one trimConvertDataOne
-		if err := json.Unmarshal(req.Data, &one); err != nil || one.Path == "" {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{}`))
-			return
-		}
-		if one.Path == "/vol1/bad" {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"errno":500,"errmsg":"bad path"}`))
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"code": 0,
-			"data": []map[string]string{{"path": one.Path, "semanticPath": "语义/" + one.Path}},
-		})
-	}))
-	defer srv.Close()
-
-	m, err := newTestClient(srv, "tok").Convert(context.Background(), []string{"/vol1/ok", "/vol1/bad"}, "zh-CN")
-	if err != nil {
-		t.Fatalf("部分失败不应整体报错: %v", err)
-	}
-	if m["/vol1/ok"] != "语义//vol1/ok" {
-		t.Errorf("好路径应转换成功，map = %v", m)
-	}
-	if _, ok := m["/vol1/bad"]; ok {
-		t.Errorf("失败路径不应写入映射，map = %v", m)
-	}
-}
-
-// 真实网关（生产实测）返回数组格式的 data，而非文档描述的 {status, result} 对象
+// 数组格式 data：真实网关的返回格式，必须能正确解析
 func TestTrimPathConvertArrayData(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -202,7 +103,7 @@ func TestTrimPathConvertErrors(t *testing.T) {
 		body    string
 		wantErr string
 	}{
-		{"非200", http.StatusInternalServerError, `{}`, "状态码 500"},
+		{"非200带响应体", http.StatusInternalServerError, `{"code":200006,"msg":"Internal Error","data":null}`, `状态码 500: {"code":200006`},
 		{"网关拦截非JSON", http.StatusOK, "invalid token", "响应解析失败"},
 		{"code非0", http.StatusOK, `{"code":401,"msg":"token invalid"}`, "token invalid"},
 		{"status非0", http.StatusOK, `{"code":0,"data":{"status":2,"result":[]}}`, "转换状态 2"},
@@ -248,17 +149,13 @@ func TestTrimPathConvertBatching(t *testing.T) {
 	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		var req struct {
-			Data json.RawMessage `json:"data"`
-		}
+		var req trimConvertReq
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		var data trimConvertData
-		_ = json.Unmarshal(req.Data, &data)
-		if len(data.Path) > trimBatchSize {
-			t.Errorf("单批 %d 超过上限 %d", len(data.Path), trimBatchSize)
+		if len(req.Data.Path) > trimBatchSize {
+			t.Errorf("单批 %d 超过上限 %d", len(req.Data.Path), trimBatchSize)
 		}
-		result := make([]map[string]string, 0, len(data.Path))
-		for _, p := range data.Path {
+		result := make([]map[string]string, 0, len(req.Data.Path))
+		for _, p := range req.Data.Path {
 			result = append(result, map[string]string{"path": p, "semanticPath": "语义/" + p})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
