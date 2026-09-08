@@ -579,6 +579,14 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
         </div>
       </div>
 
+      {/* 横向滚动条：显式落在列表与底栏之间（原生条贴盒底边且被渐隐 mask 吞掉大半，难以察觉） */}
+      <HorizontalScrollbar
+        hostRef={parentRef}
+        syncKey={`${resizing?.key ?? ''}:${resizing?.width ?? 0}:${columns
+          .map((c) => (c.visible ? `${c.key}:${c.width ?? 100}` : ''))
+          .join(',')}`}
+      />
+
       {/* 列拖拽跟随指针的实心胶囊（portal 到 body，避免 fixed 被 backdrop-filter 劫持） */}
       {dragPos && dragCol && createPortal(
         <div
@@ -607,6 +615,137 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
       <EditModals target={editTarget} onClose={() => setEditTarget(null)} />
       <RemoveTorrentDialog open={!!removeIds} ids={removeIds ?? []} onClose={() => setRemoveIds(null)} />
       <ReplaceTrackerDialog open={trackerOpen} onClose={() => setTrackerOpen(false)} />
+    </div>
+  )
+}
+
+// ========== 底部横向滚动条 ==========
+// 表格列总宽超视口时，原生横向滚动条贴在滚动盒底边，且大半落在底部渐隐的
+// 全透明 mask 区里，细到难以察觉。这里显式渲染一条放在列表与底栏之间：
+// 支持拖拽拇指、点击/按住轨道跳转，拇指位置实时跟随横向滚动。
+// 无横向溢出时不渲染，避免占位。
+function HorizontalScrollbar({ hostRef, syncKey }: {
+  hostRef: React.RefObject<HTMLDivElement | null>
+  // 列宽拖拽等改变 scrollWidth 却不触发宿主 scroll/resize 的场景，由调用方捎带刷新
+  syncKey?: string
+}) {
+  const [state, setState] = useState({ visible: false, ratio: 1, pos: 0 })
+  const updateRef = useRef<() => void>(() => {})
+  // 拖拽拇指：指针位移 × 溢出量/拇指行程 换算成 scrollLeft。
+  // 拖拽中滚动会触发重渲染，状态必须放 ref，不能用渲染期局部对象。
+  // 所有 hooks 必须在提前 return 之前调用，否则滚动条从隐藏变可见时 hook 数量
+  // 增多会触发 React #310
+  const dragRef = useRef<{ startX: number; startScroll: number; pxPerPx: number } | null>(null)
+
+  useLayoutEffect(() => { updateRef.current() }, [syncKey])
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    let raf = 0
+    const update = () => {
+      raf = 0
+      const overflow = host.scrollWidth - host.clientWidth
+      if (overflow <= 1 || host.clientWidth <= 0) {
+        setState((cur) => (cur.visible ? { visible: false, ratio: 1, pos: 0 } : cur))
+        return
+      }
+      // 拇指最窄 32px（宽度用百分比表达，左移量按剩余行程折算）
+      const ratio = Math.max(32 / host.clientWidth, host.clientWidth / host.scrollWidth)
+      setState({
+        visible: true,
+        ratio,
+        pos: Math.min(1, Math.max(0, host.scrollLeft / overflow)),
+      })
+    }
+    updateRef.current = update
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(update)
+    }
+    host.addEventListener('scroll', schedule, { passive: true })
+    const ro = new ResizeObserver(schedule)
+    ro.observe(host)
+    // 绝对定位的行不改变内容 wrapper 的 border-box，仍观察它兜底内容尺寸变化
+    if (host.firstElementChild) ro.observe(host.firstElementChild)
+    update()
+    return () => {
+      host.removeEventListener('scroll', schedule)
+      ro.disconnect()
+      if (raf) cancelAnimationFrame(raf)
+      updateRef.current = () => {}
+    }
+  }, [hostRef])
+
+  if (!state.visible) return null
+
+  // 拖拽拇指：指针位移 × 溢出量/拇指行程 换算成 scrollLeft
+  const onThumbPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const host = hostRef.current
+    const thumb = e.currentTarget
+    if (!host) return
+    const overflow = host.scrollWidth - host.clientWidth
+    const maxTravel = Math.max(1, (thumb.parentElement?.clientWidth ?? 0) - thumb.offsetWidth)
+    dragRef.current = { startX: e.clientX, startScroll: host.scrollLeft, pxPerPx: overflow / maxTravel }
+    thumb.setPointerCapture(e.pointerId)
+  }
+  const onThumbPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const host = hostRef.current
+    const d = dragRef.current
+    if (!host || !d) return
+    host.scrollLeft = d.startScroll + (e.clientX - d.startX) * d.pxPerPx
+  }
+  const onThumbPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null
+    e.currentTarget.releasePointerCapture(e.pointerId)
+  }
+
+  // 点击/按住轨道：拇指中心对齐落点并跟随指针
+  const onTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).dataset.thumb) return
+    e.preventDefault()
+    const host = hostRef.current
+    const track = e.currentTarget
+    if (!host) return
+    const rect = track.getBoundingClientRect()
+    const overflow = host.scrollWidth - host.clientWidth
+    const thumbW = Math.max(32, (host.clientWidth / host.scrollWidth) * rect.width)
+    const maxTravel = Math.max(1, rect.width - thumbW)
+    const jumpTo = (cx: number) => {
+      host.scrollLeft = Math.min(overflow, Math.max(0, ((cx - rect.left - thumbW / 2) / maxTravel) * overflow))
+    }
+    jumpTo(e.clientX)
+    track.setPointerCapture(e.pointerId)
+    const onMove = (ev: PointerEvent) => jumpTo(ev.clientX)
+    const onUp = () => {
+      track.removeEventListener('pointermove', onMove)
+      track.removeEventListener('pointerup', onUp)
+      track.removeEventListener('pointercancel', onUp)
+    }
+    track.addEventListener('pointermove', onMove)
+    track.addEventListener('pointerup', onUp)
+    track.addEventListener('pointercancel', onUp)
+  }
+
+  return (
+    // 占位收窄到 10px 并贴近状态栏：视觉条 4px（与全局竖向滚动条同款 45% 透明度），
+    // 轨道平时近乎透明避免底部出现明显横带；热区保持整行 10px 高便于点按
+    // --pad-bottom 含 --shell-gap 余量，玻璃上沿 = pad-bottom - gap；
+    // 再减去容器内视觉条的居中偏移 3px，使条底正好贴住底栏玻璃上沿
+    <div className="shrink-0 flex items-center px-3" style={{ height: 10, marginBottom: 'calc(var(--pad-bottom) - var(--shell-gap) - 3px)' }}>
+      <div className="relative w-full h-full cursor-pointer touch-none group/hbar" onPointerDown={onTrackPointerDown}>
+        <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-gray-300/25 dark:bg-white/[0.05] group-hover/hbar:bg-gray-300/45 dark:group-hover/hbar:bg-white/[0.1] transition-colors" />
+        <div
+          data-thumb
+          className="absolute top-1/2 -translate-y-1/2 h-1 rounded-full bg-gray-400/45 dark:bg-gray-500/45 hover:bg-primary/60 active:bg-primary/70 transition-colors cursor-grab active:cursor-grabbing touch-none"
+          style={{ width: `${state.ratio * 100}%`, minWidth: 32, left: `${state.pos * (1 - state.ratio) * 100}%` }}
+          onPointerDown={onThumbPointerDown}
+          onPointerMove={onThumbPointerMove}
+          onPointerUp={onThumbPointerUp}
+          onPointerCancel={onThumbPointerUp}
+        />
+      </div>
     </div>
   )
 }

@@ -354,11 +354,13 @@ export const DesktopSidebar: React.FC = () => {
                 <HardDrive className="w-3 h-3" />
                 {t('statusBar.freeSpace')}
               </div>
-              <div className="tm-mono text-subhead font-semibold text-gray-700 dark:text-gray-200 truncate">
-                {freeSpace ? formatBytes(freeSpace.freeSpace) : '--'}
-              </div>
-              <div className="text-caption1 text-gray-400 tm-mono truncate">
-                {freeSpace ? `/ ${formatBytes(freeSpace.totalSize)}` : ''}
+              <div className="tm-mono truncate whitespace-nowrap">
+                <span className="text-subhead font-semibold text-gray-700 dark:text-gray-200">
+                  {freeSpace ? formatBytes(freeSpace.freeSpace) : '--'}
+                </span>
+                {freeSpace && (
+                  <span className="text-caption1 text-gray-400"> / {formatBytes(freeSpace.totalSize)}</span>
+                )}
               </div>
             </div>
           </div>
@@ -1258,11 +1260,13 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({ visible, onClose, on
                 <HardDrive className="w-3 h-3" />
                 {t('statusBar.freeSpace')}
               </div>
-              <div className="tm-mono text-subhead font-semibold text-gray-700 dark:text-gray-200 truncate">
-                {freeSpace ? formatBytes(freeSpace.freeSpace) : '--'}
-              </div>
-              <div className="text-caption1 text-gray-400 tm-mono truncate">
-                {freeSpace ? `/ ${formatBytes(freeSpace.totalSize)}` : ''}
+              <div className="tm-mono truncate whitespace-nowrap">
+                <span className="text-subhead font-semibold text-gray-700 dark:text-gray-200">
+                  {freeSpace ? formatBytes(freeSpace.freeSpace) : '--'}
+                </span>
+                {freeSpace && (
+                  <span className="text-caption1 text-gray-400"> / {formatBytes(freeSpace.totalSize)}</span>
+                )}
               </div>
             </div>
           </div>

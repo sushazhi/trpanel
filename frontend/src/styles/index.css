@@ -554,12 +554,17 @@ input[type='range']:disabled::-moz-range-thumb {
 .tm-scroll--notch {
   --m-top: 0px;
   --fade-top: 0px;
+  /* 自定义横向滚动条（DesktopTable 的 HorizontalScrollbar）接管底部后，
+     滚动区不再延伸到状态栏玻璃下方，无需再为停靠栏预留 52px 渐隐区——
+     否则透明区会切进真实列表内容，表现为列表下缘被"吃掉"一条。
+     仅保留 12px 柔化边缘；原生横向滚动条继续隐藏（竖向不受影响） */
+  --m-bottom: 0px;
+  --fade-bottom: 12px;
   padding-top: 0;
   overflow-x: auto;
-  /* 原生横向滚动条画在盒底边 0~10px，正落在底部渐隐的全透明区里被 mask 整条吞掉。
-     在渐变最底端保留 10px 不透明硬切条带让滚动条露出；该区只有 padding 无内容，渐隐视觉不变 */
-  -webkit-mask-image: linear-gradient(to top, #000 10px, transparent 10px, transparent var(--m-bottom), #000 var(--fade-bottom));
-  mask-image: linear-gradient(to top, #000 10px, transparent 10px, transparent var(--m-bottom), #000 var(--fade-bottom));
+}
+.tm-scroll--notch::-webkit-scrollbar:horizontal {
+  display: none;
 }
 /* 侧栏滚动区坐标原点不同（面板已内缩），换算到自身高度 */
 .tm-scroll--side {
