@@ -29,10 +29,23 @@ func (h *Handler) listServers(c *gin.Context) {
 	respond(c, gin.H{"servers": out, "activeServer": st.ActiveServer})
 }
 
+// serverInput 保存服务器列表的入参。Pass 用指针区分两种语义：
+//   - nil（字段缺省）：未提交密码，沿用原值（列表接口不回传密码）
+//   - 非 nil（含空串）：显式设置密码，空串表示清空
+//
+// 若无此区分，界面仅编辑地址或名称时（前端全量回传、密码字段留空）就会静默清空凭据。
+type serverInput struct {
+	Name    string  `json:"name"`
+	URL     string  `json:"url"`
+	User    string  `json:"user"`
+	Pass    *string `json:"pass"`
+	Enabled bool    `json:"enabled"`
+}
+
 // saveServers 全量保存服务器列表
 func (h *Handler) saveServers(c *gin.Context) {
 	var body struct {
-		Servers []state.Server `json:"servers"`
+		Servers []serverInput `json:"servers"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
@@ -45,32 +58,44 @@ func (h *Handler) saveServers(c *gin.Context) {
 		for _, f := range []struct{ name, value string }{
 			{"地址", body.Servers[i].URL},
 			{"用户名", body.Servers[i].User},
-			{"密码", body.Servers[i].Pass},
 		} {
 			if err := config.ValidateEnvValue(f.name, f.value); err != nil {
 				respondError(c, http.StatusBadRequest, fmt.Sprintf("第 %d 个服务器：%s", i+1, err.Error()))
 				return
 			}
 		}
+		if body.Servers[i].Pass != nil {
+			if err := config.ValidateEnvValue("密码", *body.Servers[i].Pass); err != nil {
+				respondError(c, http.StatusBadRequest, fmt.Sprintf("第 %d 个服务器：%s", i+1, err.Error()))
+				return
+			}
+		}
 	}
 	err := h.state.Update(func(st *state.State) {
-		// 列表接口不返回密码（仅返回 hasPass），因此前端全量回传时 Pass 为空。
-		// 约定：地址与名称未变且 Pass 为空 = 保持原密码不变，避免静默清空凭据。
-		// 必须按「地址+名称」匹配而非列表索引：界面上调整顺序后索引与服务器不再对应，
-		// 按索引回填会把上一个位置的密码安到下一个服务器上（地址相同时即凭据串号）。
-		old := make(map[string]string, len(st.Servers))
+		// 密码沿用采用两级匹配，兼顾两种编辑方式：
+		//  1) 地址+名称相同 —— 覆盖「仅调整顺序」的场景（纯按索引回填会在重排后串号）
+		//  2) 索引相同 —— 覆盖「改了地址或名称」的场景（此时按地址匹配必然落空）
+		byKey := make(map[string]string, len(st.Servers))
 		for _, s := range st.Servers {
-			old[s.URL+"\x00"+s.Name] = s.Pass
+			byKey[s.URL+"\x00"+s.Name] = s.Pass
 		}
+		next := make([]state.Server, 0, len(body.Servers))
 		for i := range body.Servers {
-			if body.Servers[i].Pass != "" {
-				continue
+			in := &body.Servers[i]
+			s := state.Server{Name: in.Name, URL: in.URL, User: in.User, Enabled: in.Enabled}
+			switch {
+			case in.Pass != nil:
+				s.Pass = *in.Pass
+			default:
+				if pass, ok := byKey[in.URL+"\x00"+in.Name]; ok {
+					s.Pass = pass
+				} else if i < len(st.Servers) {
+					s.Pass = st.Servers[i].Pass
+				}
 			}
-			if pass, ok := old[body.Servers[i].URL+"\x00"+body.Servers[i].Name]; ok {
-				body.Servers[i].Pass = pass
-			}
+			next = append(next, s)
 		}
-		st.Servers = body.Servers
+		st.Servers = next
 		switch {
 		case len(st.Servers) == 0:
 			// 列表已空：0 不是有效索引，置 -1 表示无活动服务器
@@ -86,18 +111,28 @@ func (h *Handler) saveServers(c *gin.Context) {
 	respond(c, gin.H{"updated": true})
 }
 
-// deleteServer 删除指定服务器
+// deleteServer 删除指定服务器。
+// 若删掉的正是当前连接的服务器，必须显式热切换 RPC 客户端：连接不会被状态修改
+// 自动带走，否则界面显示的是新的活动服务器、数据却仍来自已被删除的那台。
 func (h *Handler) deleteServer(c *gin.Context) {
 	idx, err := strconv.Atoi(c.Param("index"))
 	if err != nil {
 		respondError(c, http.StatusBadRequest, "无效的服务器索引")
 		return
 	}
-	var deleted bool
+	var (
+		deleted   bool
+		wasActive bool
+		nextURL   string
+		nextUser  string
+		nextPass  string
+		hasNext   bool
+	)
 	err = h.state.Update(func(st *state.State) {
 		if idx < 0 || idx >= len(st.Servers) {
 			return
 		}
+		wasActive = st.ActiveServer == idx
 		st.Servers = append(st.Servers[:idx], st.Servers[idx+1:]...)
 		switch {
 		case len(st.Servers) == 0:
@@ -108,17 +143,43 @@ func (h *Handler) deleteServer(c *gin.Context) {
 		case st.ActiveServer == idx:
 			st.ActiveServer = 0
 		}
+		if st.ActiveServer >= 0 && st.ActiveServer < len(st.Servers) {
+			if srv := st.Servers[st.ActiveServer]; srv.URL != "" {
+				nextURL, nextUser, nextPass, hasNext = srv.URL, srv.User, srv.Pass, true
+			}
+		}
 		deleted = true
 	})
 	if !deleted {
 		respondError(c, http.StatusBadRequest, "服务器不存在")
 		return
 	}
+	var warnings []string
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "删除已生效但保存状态失败: "+err.Error())
-		return
+		warnings = append(warnings, "删除已生效但写入状态文件失败: "+err.Error())
 	}
-	respond(c, gin.H{"deleted": true})
+	if wasActive {
+		switch {
+		case !hasNext:
+			warnings = append(warnings, "已删除当前服务器且没有可用的备用服务器，连接保持不变")
+		case h.rpc.Reconfigure(nextURL, nextUser, nextPass) != nil:
+			warnings = append(warnings, "切换到备用服务器失败，连接仍指向已删除的服务器")
+		default:
+			if _, perr := h.rpc.Client().Ping(c.Request.Context()); perr != nil {
+				warnings = append(warnings, "已切换到备用服务器，但连接测试失败: "+perr.Error())
+			}
+			if werr := config.SaveLocalSettings(h.dataDir,
+				h.currentLocalSettings(nextURL, nextUser, nextPass, h.hub.getPollInterval().String())); werr != nil {
+				warnings = append(warnings, "连接配置未能写入 .env.local，重启后仍会使用原地址")
+			}
+			h.hub.Bump()
+		}
+	}
+	out := gin.H{"deleted": true}
+	if len(warnings) > 0 {
+		out["warning"] = strings.Join(warnings, "；")
+	}
+	respond(c, out)
 }
 
 // switchServer 切换到指定服务器（测试连通后热更新并持久化）
@@ -165,14 +226,10 @@ func (h *Handler) switchServer(c *gin.Context) {
 		slog.Warn("持久化活动服务器失败", "index", body.Index, "err", err)
 		warnings = append(warnings, "活动服务器未能写入状态文件，重启后会回到原服务器")
 	}
-	if err := config.SaveLocalSettings(h.dataDir, config.LocalSettings{
-		TransmissionURL: srv.URL,
-		User:            srv.User,
-		Pass:            srv.Pass,
-		PollInterval:    h.hub.getPollInterval().String(),
-		MCPEnabled:      h.mcp.Enabled.Load(),
-		MCPAllowDelete:  h.mcp.AllowDelete.Load(),
-	}); err != nil {
+	// 必须携带全部受管键：.env.local 是整文件重写，漏传的键会被写成空值
+	// （曾漏传 MCP_TOKEN，导致切换服务器后 MCP 变成无鉴权端点）
+	if err := config.SaveLocalSettings(h.dataDir,
+		h.currentLocalSettings(srv.URL, srv.User, srv.Pass, h.hub.getPollInterval().String())); err != nil {
 		slog.Warn("持久化连接配置失败", "err", err)
 		warnings = append(warnings, "连接配置未能写入 .env.local，重启后仍会使用原地址")
 	}

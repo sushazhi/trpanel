@@ -71,7 +71,8 @@ function flagEmojiSupported(): boolean {
   try {
     const canvas = document.createElement('canvas')
     canvas.width = canvas.height = 20
-    const ctx = canvas.getContext('2d')
+    // willReadFrequently：消除 Chrome 对连续 getImageData 的性能警告
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
     if (!ctx) return (flagEmojiCache = false)
     ctx.textBaseline = 'top'
     ctx.font = '16px sans-serif'
@@ -686,7 +687,6 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
   ]
 
   const peerColumns: TableColumn<Record<string, unknown>>[] = [
-    { key: 'address', title: t('detail.peerAddress'), render: (p) => <span>{(p.address as string) || '-'}</span>, sortValue: (p) => (p.address as string) || '' },
     {
       key: 'location',
       title: t('detail.peerLocation'),
@@ -697,6 +697,7 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
       },
       sortValue: (p) => (geoMap[p.address as string]?.country || '').toUpperCase(),
     },
+    { key: 'address', title: t('detail.peerAddress'), render: (p) => <span>{(p.address as string) || '-'}</span>, sortValue: (p) => (p.address as string) || '' },
     {
       key: 'connection',
       title: t('detail.peerConnection'),

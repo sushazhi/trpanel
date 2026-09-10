@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	trpc "github.com/hekmon/transmissionrpc/v3"
+	"github.com/trpanel/backend/internal/rpc"
 )
 
 // maxTorrentFileSize 上传种子文件大小上限（10MB）
@@ -187,9 +188,9 @@ func (h *Handler) addTorrent(c *gin.Context) {
 		respond(c, gin.H{"id": id})
 		return
 	}
-	link := body.URL
+	link := strings.TrimSpace(body.URL)
 	if link == "" {
-		link = body.Magnet
+		link = strings.TrimSpace(body.Magnet)
 	}
 	if link == "" {
 		respondError(c, http.StatusBadRequest, "缺少 URL、磁力链接或种子路径")
@@ -213,16 +214,10 @@ func (h *Handler) addTorrent(c *gin.Context) {
 	respond(c, gin.H{"id": id})
 }
 
-// validTorrentLink 校验 URL/磁力链接的 scheme。
-// Transmission 的 torrent-add filename 参数原生支持本地路径：若不限制 scheme，
-// 攻击者可用 url 字段传任意本地路径，借 Transmission 进程权限绕过面板的
-// TORRENT_PATH_ROOTS 文件读取白名单（readTorrentFile 的校验形同虚设），
-// 同时也构成由 Transmission 发起的任意出网下载。
+// validTorrentLink 校验 URL/磁力链接的 scheme（实现见 rpc.ValidTorrentLink，
+// 与 MCP 的 add_torrent 共用同一份判定，避免只在一侧校验留下绕过通道）。
 func validTorrentLink(link string) bool {
-	l := strings.ToLower(link)
-	return strings.HasPrefix(l, "http://") ||
-		strings.HasPrefix(l, "https://") ||
-		strings.HasPrefix(l, "magnet:")
+	return rpc.ValidTorrentLink(link)
 }
 
 // validSeedIdleLimit 校验做种空闲上限（分钟）：int64 分钟 × 60e9 纳秒（time.Minute）
@@ -243,7 +238,9 @@ func (h *Handler) readTorrentFile(path string) ([]byte, error) {
 	return os.ReadFile(target)
 }
 
-// addTorrentBatch 批量添加多个URL/磁力链接
+// addTorrentBatch 批量添加多个URL/磁力链接。
+// 单项失败不中断整批，而是收集到 failed 一并返回：前端一次调用即可拿到成败明细，
+// 无需在批量接口失败后逐条重试——那样会把已成功添加的链接重复插入。
 func (h *Handler) addTorrentBatch(c *gin.Context) {
 	defer h.hub.Bump()
 	ctx := c.Request.Context()
@@ -263,18 +260,22 @@ func (h *Handler) addTorrentBatch(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "urls 不能为空")
 		return
 	}
-	for _, url := range body.URLs {
-		if !validTorrentLink(url) {
-			respondError(c, http.StatusBadRequest, "URL 仅支持 http(s) 链接或磁力链接: "+url)
-			return
-		}
+	type batchFailure struct {
+		URL   string `json:"url"`
+		Error string `json:"error"`
 	}
 	ids := make([]int64, 0, len(body.URLs))
-	for _, url := range body.URLs {
+	var failed []batchFailure
+	for _, raw := range body.URLs {
+		url := strings.TrimSpace(raw)
+		if !validTorrentLink(url) {
+			failed = append(failed, batchFailure{URL: url, Error: "仅支持 http(s) 链接或磁力链接"})
+			continue
+		}
 		id, err := h.rpc.Client().AddTorrentByURL(ctx, url, body.DownloadDir, body.Paused, body.Labels, body.BandwidthPriority)
 		if err != nil {
-			respondError(c, http.StatusBadGateway, "添加失败: "+err.Error())
-			return
+			failed = append(failed, batchFailure{URL: url, Error: rpc.SanitizeClientMsg(err.Error())})
+			continue
 		}
 		ids = append(ids, id)
 	}
@@ -284,7 +285,11 @@ func (h *Handler) addTorrentBatch(c *gin.Context) {
 			return
 		}
 	}
-	respond(c, gin.H{"ids": ids})
+	out := gin.H{"ids": ids, "failed": failed}
+	if len(failed) > 0 {
+		out["warning"] = strconv.Itoa(len(failed)) + " 个链接添加失败"
+	}
+	respond(c, out)
 }
 
 // startTorrent 启动单个种子
@@ -664,6 +669,7 @@ func parseIDsBody(c *gin.Context) ([]int64, bool) {
 
 // startTorrents 批量启动
 func (h *Handler) startTorrents(c *gin.Context) {
+	defer h.hub.Bump()
 	ids, ok := parseIDsBody(c)
 	if !ok {
 		return

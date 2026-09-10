@@ -8,13 +8,40 @@ import type { WsMessage } from '@/types'
 
 export type WsStatus = 'connecting' | 'connected' | 'disconnected'
 
-// REST 兜底拉取间隔（仅当 WebSocket 不可用时启用）
-const FALLBACK_POLL_MS = 5000
+// REST 兜底拉取间隔：优先跟随「设置 → 轮询间隔」（与后端 WS 推流节奏同源），
+// 未知或非法值时退回默认值。下限避免把间隔配成 0 造成请求洪水。
+const DEFAULT_FALLBACK_POLL_MS = 5000
+const MIN_FALLBACK_POLL_MS = 1000
 // 初次连接阶段的连续失败上限，达到后放弃重连，仅用 REST 轮询（内嵌 WebView 等环境 ws 不可用）
 const MAX_WS_RETRIES = 5
 // 已成功连接过说明环境支持 ws，此时放宽上限：后端开发态热重启（air）会频繁断开 ws，
 // 不应因重启期间的重试计数而永久退化到轮询
 const MAX_WS_RETRIES_AFTER_SUCCESS = 30
+
+// parseIntervalMs 解析 Go duration 风格的轮询间隔（如 "2s" / "500ms" / "1m"）。
+// 解析失败返回 0，由调用方回退到默认值。
+function parseIntervalMs(raw: string): number {
+  const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec((raw ?? '').trim())
+  if (!m) return 0
+  const n = Number(m[1])
+  if (!Number.isFinite(n) || n <= 0) return 0
+  switch (m[2]) {
+    case 'ms':
+      return n
+    case 's':
+      return n * 1000
+    case 'm':
+      return n * 60_000
+    default:
+      return n * 3_600_000
+  }
+}
+
+// fallbackPollMs 当前应使用的兜底轮询间隔
+function fallbackPollMs(): number {
+  const parsed = parseIntervalMs(useAppStore.getState().pollInterval)
+  return parsed > 0 ? Math.max(MIN_FALLBACK_POLL_MS, parsed) : DEFAULT_FALLBACK_POLL_MS
+}
 
 // WebSocket 连接管理（自动重连，指数退避）
 // 兜底策略：某些环境（如内嵌 WebView）会阻断 WebSocket，此时退化用 REST API 轮询，保证数据可显示
@@ -52,7 +79,7 @@ export function useWebSocket() {
     const startPolling = () => {
       stopPolling()
       void fetchFallback()
-      pollTimer = window.setInterval(() => void fetchFallback(), FALLBACK_POLL_MS)
+      pollTimer = window.setInterval(() => void fetchFallback(), fallbackPollMs())
     }
 
     const connect = () => {
@@ -138,12 +165,18 @@ export function useWebSocket() {
       else connect()
     }
 
+    // 轮询间隔变化（设置页保存）后重建兜底定时器，无需刷新页面
+    const unsubscribeInterval = useAppStore.subscribe((state, prev) => {
+      if (state.pollInterval !== prev.pollInterval && pollTimer) startPolling()
+    })
+
     // 挂载时立即用 REST 拉取一次，避免依赖 ws 才出数据
     void fetchFallback()
     connect()
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       closed = true
+      unsubscribeInterval()
       if (retryTimer) {
         window.clearTimeout(retryTimer)
         retryTimer = null

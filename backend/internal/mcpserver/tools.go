@@ -356,7 +356,13 @@ func (s *Server) addTorrent(ctx context.Context, _ *mcp.CallToolRequest, in addT
 		}
 		id, err = s.manager.Client().AddTorrentByFile(ctx, data, in.DownloadDir, paused, in.Labels, nil, nil, nil)
 	case in.Link != "":
-		id, err = s.manager.Client().AddTorrentByURL(ctx, in.Link, in.DownloadDir, paused, in.Labels, nil)
+		link := strings.TrimSpace(in.Link)
+		// 与 REST 的按链接添加一致：Transmission 的 filename 支持本地路径，
+		// 不限制 scheme 即可借它的权限读任意文件、绕过文件白名单
+		if !rpc.ValidTorrentLink(link) {
+			return nil, nil, errors.New("link 仅支持 http(s) 链接或磁力链接")
+		}
+		id, err = s.manager.Client().AddTorrentByURL(ctx, link, in.DownloadDir, paused, in.Labels, nil)
 	default:
 		return nil, nil, errors.New("缺少 link 或 path")
 	}
@@ -535,6 +541,7 @@ func (s *Server) reannounceTorrents(ctx context.Context, _ *mcp.CallToolRequest,
 	if err := s.manager.Client().ReannounceTorrents(ctx, in.IDs); err != nil {
 		return nil, nil, errors.New(rpc.SanitizeClientMsg(err.Error()))
 	}
+	s.bump()
 	return nil, map[string]any{"ids": in.IDs, "action": "reannounce"}, nil
 }
 

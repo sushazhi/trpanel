@@ -66,6 +66,9 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
   const [submitting, setSubmitting] = useState(false)
   const [dirHistory, setDirHistory] = useState<string[]>(loadDirHistory)
   const [parsed, setParsed] = useState<ParsedTorrent[]>([])
+  // parsed[i] 对应的原始 File。用对象引用而非下标建立映射：解析是异步的，期间
+  // files 可能被增删（例如部分失败后移除），下标会错位甚至越界；File 引用始终可靠
+  const [parsedFiles, setParsedFiles] = useState<File[]>([])
   // 每个种子的文件勾选状态（与 parsed 对齐）；搜索词独立于每个种子
   const [selections, setSelections] = useState<boolean[][]>([])
   const [searches, setSearches] = useState<string[]>([])
@@ -81,6 +84,7 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
     setLabels([])
     setPriority(0)
     setParsed([])
+    setParsedFiles([])
     setSelections([])
     setSearches([])
     setTab('file')
@@ -109,16 +113,22 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
     }
     const load = async () => {
       const results: ParsedTorrent[] = []
-      for (const f of files) {
+      const sources: File[] = []
+      for (let i = 0; i < files.length; i++) {
         try {
+          const f = files[i]
           const buf = new Uint8Array(await f.arrayBuffer())
           const p = parseTorrentFile(buf)
-          if (p) results.push(p)
+          if (p) {
+            results.push(p)
+            sources.push(f)
+          }
         } catch {
-          // 非 torrent 文件忽略
+          // 非 torrent 文件忽略（提交时仍会上传一次，由后端给出明确报错）
         }
       }
       setParsed(results)
+      setParsedFiles(sources)
     }
     void load()
   }, [files])
@@ -187,12 +197,20 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
     setSubmitting(true)
     let ok = 0
     let fail = 0
+    // 首个失败原因：批量接口返回的失败明细较多，只在汇总提示里带一条
+    let firstError = ''
     try {
       if (tab === 'file') {
+        // 勾选状态按 parsed 组织，提交前按 File 引用映射回实际要上传的文件
+        const selByFile = new Map<File, boolean[]>()
+        parsed.forEach((_, pi) => {
+          const f = parsedFiles[pi]
+          if (f) selByFile.set(f, selections[pi] ?? [])
+        })
         const results: boolean[] = new Array(files.length).fill(false)
         for (let i = 0; i < files.length; i++) {
           try {
-            const sel = selections[i] ?? []
+            const sel = selByFile.get(files[i]) ?? []
             const wanted: number[] = []
             const unwanted: number[] = []
             sel.forEach((v, idx) => (v ? wanted : unwanted).push(idx))
@@ -209,34 +227,35 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
           }
         }
         if (fail > 0) setFiles((prev) => prev.filter((_, i) => !results[i]))
-        // NAS 路径种子（飞牛文件选择器选中）：后端直接读取路径文件添加
+        // NAS 路径种子（飞牛文件选择器选中）：后端直接读取路径文件添加。
+        // 已成功的从列表中移除，避免用户重试时把同一路径再加一遍
+        const failedPaths: string[] = []
         for (const p of torrentPaths) {
           try {
             await torrentApi.addByPath(p, downloadDir || undefined, paused, labels, priority, verify)
             ok++
           } catch {
             fail++
+            failedPaths.push(p)
           }
+        }
+        if (failedPaths.length !== torrentPaths.length) setTorrentPaths(failedPaths)
+      } else if (urls.length > 1) {
+        // 批量接口逐条尝试并返回失败明细，一次调用即可拿到成败结果。
+        // 不要在此失败后逐条重试：后端可能已成功添加了前几条，重试会插入重复种子
+        const res = await torrentApi.addUrls(urls, downloadDir || undefined, paused, labels, priority, verify)
+        ok += res?.ids?.length ?? 0
+        fail += res?.failed?.length ?? 0
+        firstError = res.failed?.[0]?.error ?? ''
+        if (res.failed?.length) {
+          // 输入框只保留失败的链接，用户修正后重试不会重复添加已成功的
+          const failedSet = new Set(res.failed.map((f) => f.url))
+          setUrlText(urls.filter((u) => failedSet.has(u)).join('\n'))
         }
       } else {
-        if (urls.length > 1) {
-          // 批量添加多个磁力链接
+        for (const u of urls) {
           try {
-            await torrentApi.addUrls(urls, downloadDir || undefined, paused, labels, priority, verify)
-            toast.success(`${t('addTorrent.added')} × ${ok + urls.length}`)
-            rememberDir(downloadDir)
-            reset()
-            onClose()
-            return
-          } catch {
-            fail += urls.length
-          }
-        }
-        const results: boolean[] = new Array(urls.length).fill(false)
-        for (let i = 0; i < urls.length; i++) {
-          try {
-            await torrentApi.addUrl(urls[i], downloadDir || undefined, paused, labels, priority, verify)
-            results[i] = true
+            await torrentApi.addUrl(u, downloadDir || undefined, paused, labels, priority, verify)
             ok++
           } catch {
             fail++
@@ -249,7 +268,7 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
         reset()
         onClose()
       } else {
-        toast.warning(`${t('addTorrent.added')} ${ok}，${t('common.failed')} ${fail}`)
+        toast.warning(`${t('addTorrent.added')} ${ok}，${t('common.failed')} ${fail}${firstError ? `（${firstError}）` : ''}`)
       }
     } finally {
       setSubmitting(false)

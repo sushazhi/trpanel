@@ -54,6 +54,15 @@ function inGroup(f: FilterOptions): boolean {
   )
 }
 
+// pruneSelection 剔除选区中已不存在的种子 id。
+// 无变化时返回原数组，避免无谓的重渲染。
+function pruneSelection(selectedIds: number[], torrents: Torrent[]): number[] {
+  if (selectedIds.length === 0) return selectedIds
+  const ids = new Set(torrents.map((t) => t.id))
+  if (selectedIds.every((id) => ids.has(id))) return selectedIds
+  return selectedIds.filter((id) => ids.has(id))
+}
+
 export interface AppState {
   torrents: Torrent[]
   selectedIds: number[]
@@ -71,6 +80,9 @@ export interface AppState {
   columns: ColumnConfig[]
   session: Session | null
   wsStatus: 'connecting' | 'connected' | 'disconnected'
+  // 服务端轮询间隔（如 "2s"）。WS 推流节奏与前端兜底轮询共用该值，
+  // 由 /settings 初始化、设置页保存后即时更新；空串表示未知，兜底用默认值
+  pollInterval: string
   torrentSites: Record<number, string[]>
   // 语义路径映射（原始路径 → 宿主展示名，仅 fnOS；不持久化，随语言切换重建）
   semanticDirs: Record<string, string>
@@ -119,6 +131,7 @@ export interface AppState {
   setSemanticDirs: (patch: Record<string, string>) => void
   resetSemantic: () => void
   setWsStatus: (s: AppState['wsStatus']) => void
+  setPollInterval: (v: string) => void
   setTorrents: (list: Torrent[]) => void
   applyTorrentDiff: (d: { added: Torrent[]; updated: Torrent[]; removed: number[] }) => void
   toggleSelect: (id: number) => void
@@ -166,6 +179,7 @@ export const useAppStore = create<AppState>()(
       columns: defaultColumns,
       session: null,
       wsStatus: 'connecting',
+      pollInterval: '',
       torrentSites: {},
       semanticDirs: {},
       fontSize: 16,
@@ -199,7 +213,14 @@ export const useAppStore = create<AppState>()(
       setSemanticDirs: (patch) => set((state) => ({ semanticDirs: { ...state.semanticDirs, ...patch } })),
       resetSemantic: () => set({ semanticDirs: {} }),
       setWsStatus: (s) => set({ wsStatus: s }),
-      setTorrents: (list) => set({ torrents: list }),
+      setPollInterval: (v) => set({ pollInterval: v }),
+      setTorrents: (list) =>
+        set((state) => {
+          // 整表替换（切服务器 / REST 兜底 / 断线重连补发）后，选区里已不存在的 id
+          // 必须剔除：否则批量操作会把无效 id 发给后端，跨服务器时还会误伤同号种子
+          const selectedIds = pruneSelection(state.selectedIds, list)
+          return selectedIds === state.selectedIds ? { torrents: list } : { torrents: list, selectedIds }
+        }),
       // 增量推送合并：仅更新变化的种子，未变化的保持引用不变（利于 memo 跳过重渲染）
       applyTorrentDiff: ({ added, updated, removed }) =>
         set((state) => {
@@ -207,7 +228,10 @@ export const useAppStore = create<AppState>()(
           for (const id of removed) map.delete(id)
           for (const t of added) map.set(t.id, t)
           for (const t of updated) map.set(t.id, t)
-          return { torrents: Array.from(map.values()) }
+          const torrents = Array.from(map.values())
+          // 被删除的种子同时从选区移除（removed 的 id 已不在表中）
+          const selectedIds = pruneSelection(state.selectedIds, torrents)
+          return selectedIds === state.selectedIds ? { torrents } : { torrents, selectedIds }
         }),
       toggleSelect: (id) =>
         set((state) => ({

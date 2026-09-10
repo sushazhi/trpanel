@@ -28,9 +28,12 @@ export const torrentApi = {
   // 添加种子（NAS 路径，飞牛文件选择器选中）
   addByPath: (path: string, downloadDir?: string, paused = false, labels?: string[], priority?: number, verify = false) =>
     request<{ id: number }>(client.post('/torrents/add', { path, downloadDir, paused, verify, labels, bandwidthPriority: priority })),
-  // 批量添加多个URL/磁力链接
+  // 批量添加多个URL/磁力链接。后端逐条尝试：失败的链接连同原因放在 failed 里返回，
+  // 已成功的 id 照常返回，前端无需重试（重试会造成重复添加）
   addUrls: (urls: string[], downloadDir?: string, paused = false, labels?: string[], priority?: number, verify = false) =>
-    request<{ ids: number[] }>(client.post('/torrents/add-batch', { urls, downloadDir, paused, verify, labels, bandwidthPriority: priority })),
+    request<{ ids: number[]; failed?: { url: string; error: string }[] }>(
+      client.post('/torrents/add-batch', { urls, downloadDir, paused, verify, labels, bandwidthPriority: priority }),
+    ),
   // 启动/强制启动/暂停/校验/重新宣告
   start: (id: number) => request(client.post(`/torrents/${id}/start`)),
   startNow: (id: number) => request(client.post(`/torrents/${id}/start-now`)),
@@ -85,6 +88,24 @@ export const torrentApi = {
   },
 }
 
+// 服务设置（连接配置 + MCP 服务开关）。
+// 轮询间隔由后端 WS 推流与前端的 REST 兜底轮询共用，故在启动时读一次
+export interface ServiceSettings {
+  url: string
+  user: string
+  pollInterval?: string
+  mcpEnabled?: boolean
+  mcpAllowDelete?: boolean
+  mcpAllowDangerous?: boolean
+  mcpToken?: string
+  mcpPort?: string
+}
+
+export const settingsApi = {
+  get: () => request<ServiceSettings>(client.get('/settings')),
+  update: (body: Record<string, unknown>) => request(client.put('/settings', body)),
+}
+
 // 系统命令
 export const systemApi = {
   command: (action: 'shutdown' | 'reboot') => request(client.post(`/system/${action}`)),
@@ -106,12 +127,13 @@ export const sessionApi = {
     request<{ saved: boolean }>(client.put('/session/groups', g)),
 }
 
-// 多服务器管理
+// 多服务器管理。save / remove / switch 的响应可能带 warning（状态写入失败、
+// 切换到备用服务器失败等），调用方应展示给用户，避免以为操作完全成功
 export const serverApi = {
   list: () => request<{ servers: ServerInfo[]; activeServer: number }>(client.get('/servers')),
-  save: (servers: ServerInfo[]) => request(client.post('/servers', { servers })),
-  remove: (index: number) => request(client.delete(`/servers/${index}`)),
-  switch: (index: number) => request<{ index: number; version: string }>(client.post('/servers/switch', { index })),
+  save: (servers: ServerInfo[]) => request<{ updated: boolean; warning?: string }>(client.post('/servers', { servers })),
+  remove: (index: number) => request<{ deleted: boolean; warning?: string }>(client.delete(`/servers/${index}`)),
+  switch: (index: number) => request<{ index: number; version: string; warning?: string }>(client.post('/servers/switch', { index })),
 }
 
 // 自动文件管理

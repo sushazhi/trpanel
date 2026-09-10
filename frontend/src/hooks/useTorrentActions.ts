@@ -8,13 +8,17 @@ export function useTorrentActions() {
   const { t } = useTranslation()
   const clearSelection = useAppStore((s) => s.clearSelection)
 
-  const run = async (fn: () => Promise<unknown>, successKey: string) => {
+  // run 统一处理提示与选中清理，并显式返回成败：
+  // true = 成功，false = 失败。调用方（如删除确认框）据此决定是否关闭弹窗，
+  // 不要依赖 "undefined 即成功" 的隐式约定。
+  const run = async (fn: () => Promise<unknown>, successKey: string): Promise<boolean> => {
     try {
       await fn()
       toast.success(t(successKey))
       clearSelection()
+      return true
     } catch {
-      // 错误提示已由拦截器处理，调用方需检查返回值判断成败
+      // 错误提示已由拦截器处理
       return false
     }
   }

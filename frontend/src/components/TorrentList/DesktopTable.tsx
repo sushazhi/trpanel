@@ -353,11 +353,17 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
     setSelectAnchor(torrent.id)
   }
 
-  // 拖拽排序：按队列位置差执行 QueueMove
+  // 拖拽排序：按队列位置差执行 QueueMove。
+  // 只有按「队列位置」排序时屏幕顺序才与队列顺序一致；其它排序下移动队列不会改变
+  // 行的显示位置（用户会以为拖拽失效），故直接提示并跳过，避免发一堆无意义请求
   const handleDrop = async (dst: Torrent) => {
     const srcId = dragIdRef.current
     dragIdRef.current = null
     if (srcId == null || srcId === dst.id) return
+    if (sortField !== 'queuePosition') {
+      toast.warning(t('toast.queueSortRequired'))
+      return
+    }
     const src = sortedTorrents.find((x) => x.id === srcId)
     if (!src) return
     const steps = src.queuePosition - dst.queuePosition

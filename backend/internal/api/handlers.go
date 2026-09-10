@@ -41,9 +41,12 @@ type Handler struct {
 	plat         platform.Platform
 	dataDir      string
 	apiToken     string
-	mcpPort      string
 	mcp          *McpControl
 	pathMappings []models.PathMapping
+
+	// MCP 直连端口：设置界面可改，读写跨请求并发，必须加锁
+	mcpPortMu sync.RWMutex
+	mcpPort   string
 
 	// 后端建种任务表（见 createtorrent.go）
 	createMu   sync.Mutex
@@ -65,10 +68,48 @@ func NewHandler(manager *rpc.Manager, hub *Hub, geo *GeoService, st *state.Store
 		plat:         plat,
 		dataDir:      cfg.DataDir,
 		apiToken:     cfg.APIToken,
-		mcpPort:      cfg.MCPPort,
+		mcpPort:      strings.TrimSpace(cfg.MCPPort),
 		mcp:          mcp,
 		pathMappings: parsePathMappings(cfg.PathMappings),
 		createJobs:   make(map[string]*createJob),
+	}
+}
+
+// getMCPPort / setMCPPort 读写 MCP 直连端口配置（读请求与设置保存并发）。
+// "0" 与空等价，统一按空返回，避免前端把它当有效端口拼地址
+func (h *Handler) getMCPPort() string {
+	h.mcpPortMu.RLock()
+	defer h.mcpPortMu.RUnlock()
+	if h.mcpPort == "0" {
+		return ""
+	}
+	return h.mcpPort
+}
+
+func (h *Handler) setMCPPort(port string) {
+	h.mcpPortMu.Lock()
+	h.mcpPort = port
+	h.mcpPortMu.Unlock()
+}
+
+// currentLocalSettings 汇总当前生效的连接与 MCP 配置。
+// .env.local 是整文件重写，任何保存入口都必须携带全部受管键；集中在此构造可
+// 避免某个入口漏传（切换服务器曾漏传 MCP_TOKEN，导致令牌被静默清空）。
+func (h *Handler) currentLocalSettings(url, user, pass, poll string) config.LocalSettings {
+	var token string
+	if t := h.mcp.Token.Load(); t != nil {
+		token = *t
+	}
+	return config.LocalSettings{
+		TransmissionURL:   url,
+		User:              user,
+		Pass:              pass,
+		PollInterval:      poll,
+		MCPEnabled:        h.mcp.Enabled.Load(),
+		MCPAllowDelete:    h.mcp.AllowDelete.Load(),
+		MCPAllowDangerous: h.mcp.AllowDangerous.Load(),
+		MCPToken:          token,
+		MCPPort:           h.getMCPPort(),
 	}
 }
 

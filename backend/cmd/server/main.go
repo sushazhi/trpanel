@@ -85,8 +85,10 @@ func main() {
 	_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	r.Use(gin.Recovery(), middleware.Logger(), middleware.SecurityHeaders(plat), middleware.CORS(plat))
 
-	// GeoIP 服务（mmdb 文件缺失时自动降级为空查询）
+	// GeoIP 服务：优先加载手动放置的 mmdb/GeoLite2-City.mmdb；缺失时后台自动
+	// 下载到数据目录（仅首次，约 60MB），下载完成前归属地显示为 -
 	geo := api.NewGeoService("mmdb/GeoLite2-City.mmdb")
+	go geo.EnsureAvailable(ctx, filepath.Join(cfg.DataDir, "mmdb", "GeoLite2-City.mmdb"))
 
 	// 持久化状态（多服务器/自动文件管理/做种策略）
 	store, err := state.Load(state.DefaultStatePath(cfg.DataDir))
@@ -207,24 +209,40 @@ func main() {
 			slog.Error("MCP_PORT 非法：必须是 1-65535 的端口号", "value", cfg.MCPPort)
 			os.Exit(1)
 		}
-		mcpRouter := gin.New()
-		mcpRouter.Use(gin.Recovery(), middleware.Logger())
-		mcpRouter.Any("/mcp", append(mcpGuards, gin.WrapH(mcpHandler))...)
-		mcpSrv = &http.Server{Handler: mcpRouter, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
-		mcpAddr := net.JoinHostPort(cfg.Host, cfg.MCPPort)
-		mcpLn, err := net.Listen("tcp", mcpAddr)
-		if err != nil {
-			slog.Error("MCP 端口监听失败", "addr", mcpAddr, "err", err)
-			os.Exit(1)
-		}
-		go func() {
-			if err := mcpSrv.Serve(mcpLn); err != nil && err != http.ErrServerClosed {
-				slog.Error("MCP 直连服务启动失败", "err", err)
-			}
-		}()
-		slog.Info("MCP 直连端口已开启", "addr", mcpLn.Addr().String())
+		// 直连端口不经过宿主网关统一认证，其唯一边界就是接入令牌。
+		// 无令牌时不监听该端口（而不是拒绝启动整个服务，避免把面板一起锁死），
+		// 仅记错误日志给出指引，界面仍可用以便用户去补配令牌
 		if mcpCtl.Token.Load() == nil {
-			slog.Warn("MCP 直连端口未启用令牌鉴权，任何可达该端口的客户端均可通过 MCP 工具控制 Transmission")
+			slog.Error("MCP 直连端口未开启：该端口必须配合令牌鉴权",
+				"addr", net.JoinHostPort(cfg.Host, cfg.MCPPort),
+				"hint", "请先在「设置 → 自动化 → MCP 服务」配置接入令牌，或清空 MCP_PORT")
+		} else {
+			mcpRouter := gin.New()
+			mcpRouter.Use(gin.Recovery(), middleware.Logger())
+			// 令牌可在设置界面被清空，故每次请求都要求令牌非空（而非仅在启动时检查一次）
+			directGuards := make([]gin.HandlerFunc, 0, len(mcpGuards)+1)
+			directGuards = append(directGuards, func(c *gin.Context) {
+				if t := mcpCtl.Token.Load(); t == nil || strings.TrimSpace(*t) == "" {
+					c.AbortWithStatus(http.StatusForbidden)
+					return
+				}
+				c.Next()
+			})
+			directGuards = append(directGuards, mcpGuards...)
+			mcpRouter.Any("/mcp", append(directGuards, gin.WrapH(mcpHandler))...)
+			mcpSrv = &http.Server{Handler: mcpRouter, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
+			mcpAddr := net.JoinHostPort(cfg.Host, cfg.MCPPort)
+			mcpLn, err := net.Listen("tcp", mcpAddr)
+			if err != nil {
+				slog.Error("MCP 端口监听失败", "addr", mcpAddr, "err", err)
+				os.Exit(1)
+			}
+			go func() {
+				if err := mcpSrv.Serve(mcpLn); err != nil && err != http.ErrServerClosed {
+					slog.Error("MCP 直连服务启动失败", "err", err)
+				}
+			}()
+			slog.Info("MCP 直连端口已开启（强制令牌鉴权）", "addr", mcpLn.Addr().String())
 		}
 	}
 

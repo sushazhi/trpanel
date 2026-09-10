@@ -56,10 +56,16 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
     }
   }
 
-  // 令牌草稿：失焦/回车且内容变化时提交一次，Esc 还原
+  // 令牌草稿：失焦/回车且内容变化时提交一次，Esc 还原。
+  // 清空令牌前必须先关掉直连端口：该端口不受面板认证保护，无令牌即等于对外开放
   const commitToken = () => {
     const next = draft.trim()
     if (next === token) return
+    if (!next && mcpPort) {
+      toast.error(t('session.mcp.tokenNeedsPort'))
+      setDraft(token)
+      return
+    }
     setDraft(next)
     void patch({ mcpToken: next }, () => setToken(next))
   }
@@ -72,11 +78,23 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
     void patch({ mcpToken: next }, () => setToken(next))
   }
 
-  // 端口草稿：失焦/回车提交；监听器随进程绑定，保存后重启才生效
+  // 端口草稿：失焦/回车提交；监听器随进程绑定，保存后重启才生效。
+  // 直连端口不受面板认证保护，后端要求「端口非空则令牌必须非空」；令牌若还是
+  // 未提交的草稿，必须与端口一次性提交（分两次会整文件重写互相覆盖）
   const commitPort = () => {
     const next = portDraft.trim()
     if (next === mcpPort) return
+    const pendingToken = draft.trim()
+    if (next && !token && !pendingToken) {
+      toast.error(t('session.mcp.portNeedsToken'))
+      setPortDraft(mcpPort)
+      return
+    }
     setPortDraft(next)
+    if (next && pendingToken && pendingToken !== token) {
+      void patch({ mcpToken: pendingToken, mcpPort: next }, () => { setToken(pendingToken); setMcpPort(next) })
+      return
+    }
     void patch({ mcpPort: next }, () => setMcpPort(next))
   }
 

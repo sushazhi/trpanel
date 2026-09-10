@@ -28,3 +28,6 @@ mcp_allow_delete: false
 mcp_allow_dangerous: false
 # MCP 接入令牌（独立于 api_token，仅作用于 /mcp）：客户端以 Authorization: Bearer <令牌> 鉴权；留空 = 不启用
 mcp_token: ""
+# MCP 专用直连端口（1-65535，留空 = 不开启；修改需重启生效）。
+# 该端口不经过宿主网关统一认证，因此必须同时配置 mcp_token 才会启动
+mcp_port: ""

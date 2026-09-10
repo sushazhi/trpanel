@@ -20,11 +20,6 @@ func (h *Handler) getSettings(c *gin.Context) {
 	if t := h.mcp.Token.Load(); t != nil {
 		mcpToken = *t
 	}
-	// "0" 与空等价（不启用直连端口），统一按空回显，避免前端把它当有效端口拼地址
-	mcpPort := h.mcpPort
-	if mcpPort == "0" {
-		mcpPort = ""
-	}
 	respond(c, gin.H{
 		"url":               url,
 		"user":              user,
@@ -33,7 +28,7 @@ func (h *Handler) getSettings(c *gin.Context) {
 		"mcpAllowDelete":    h.mcp.AllowDelete.Load(),
 		"mcpAllowDangerous": h.mcp.AllowDangerous.Load(),
 		"mcpToken":          mcpToken,
-		"mcpPort":           mcpPort,
+		"mcpPort":           h.getMCPPort(),
 	})
 }
 
@@ -55,7 +50,7 @@ func (h *Handler) updateSettings(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "请求体无效: "+err.Error())
 		return
 	}
-	if body.URL == "" && body.MCPEnabled == nil && body.MCPAllowDelete == nil && body.MCPAllowDangerous == nil && body.MCPToken == nil && body.MCPPort == nil {
+	if body.URL == "" && body.PollInterval == "" && body.MCPEnabled == nil && body.MCPAllowDelete == nil && body.MCPAllowDangerous == nil && body.MCPToken == nil && body.MCPPort == nil {
 		respondError(c, http.StatusBadRequest, "没有要保存的设置")
 		return
 	}
@@ -68,12 +63,50 @@ func (h *Handler) updateSettings(c *gin.Context) {
 	}
 	if body.MCPPort != nil {
 		*body.MCPPort = strings.TrimSpace(*body.MCPPort)
+		// "0" 与空等价：都表示关闭直连端口（配置文件里也有人写成 0）
+		if *body.MCPPort == "0" {
+			*body.MCPPort = ""
+		}
 		if *body.MCPPort != "" {
 			if p, err := strconv.Atoi(*body.MCPPort); err != nil || p < 1 || p > 65535 {
 				respondError(c, http.StatusBadRequest, "MCP 直连端口必须是 1-65535 的端口号")
 				return
 			}
 		}
+	}
+
+	// 先算出 MCP 各项的「目标值」（未提交的类目沿用当前生效值），在改动内存之前完成校验：
+	// 校验失败时不能留下「内存已改、文件未改」的半成品状态
+	targetEnabled := h.mcp.Enabled.Load()
+	if body.MCPEnabled != nil {
+		targetEnabled = *body.MCPEnabled
+	}
+	targetAllowDelete := h.mcp.AllowDelete.Load()
+	if body.MCPAllowDelete != nil {
+		targetAllowDelete = *body.MCPAllowDelete
+	}
+	targetAllowDangerous := h.mcp.AllowDangerous.Load()
+	if body.MCPAllowDangerous != nil {
+		targetAllowDangerous = *body.MCPAllowDangerous
+	}
+	var targetToken string
+	if t := h.mcp.Token.Load(); t != nil {
+		targetToken = *t
+	}
+	if body.MCPToken != nil {
+		targetToken = *body.MCPToken
+	}
+	targetPort := h.getMCPPort()
+	if body.MCPPort != nil {
+		targetPort = *body.MCPPort
+	}
+	// 直连端口不经过宿主网关认证，其唯一边界就是接入令牌：
+	// 拒绝「端口开启但无令牌」的组合，否则该端口要么静默不监听（用户以为配好了），
+	// 要么在无鉴权状态下暴露完整的管理能力。
+	// 仅在本次确实改动了 MCP 端口/令牌时校验，避免历史遗留配置连带卡住连接设置等无关保存
+	if (body.MCPPort != nil || body.MCPToken != nil) && targetPort != "" && targetToken == "" {
+		respondError(c, http.StatusBadRequest, "MCP 直连端口必须配合接入令牌：请先填写接入令牌，或清空直连端口")
+		return
 	}
 
 	if body.URL != "" {
@@ -124,35 +157,9 @@ func (h *Handler) updateSettings(c *gin.Context) {
 		}
 	}
 
-	// 热更新轮询间隔
-	if pollInterval > 0 {
-		h.hub.SetPollInterval(pollInterval)
-	}
-
-	// MCP 开关：指针区分「未提交」与 false，切换即时生效
-	if body.MCPEnabled != nil {
-		h.mcp.Enabled.Store(*body.MCPEnabled)
-	}
-	if body.MCPAllowDelete != nil {
-		h.mcp.AllowDelete.Store(*body.MCPAllowDelete)
-	}
-	if body.MCPAllowDangerous != nil {
-		h.mcp.AllowDangerous.Store(*body.MCPAllowDangerous)
-	}
-	if body.MCPToken != nil {
-		if *body.MCPToken == "" {
-			h.mcp.Token.Store(nil)
-		} else {
-			t := *body.MCPToken
-			h.mcp.Token.Store(&t)
-		}
-	}
-	// 端口无法热应用（监听器随进程启动绑定），仅更新内存值供回显，重启后生效
-	if body.MCPPort != nil {
-		h.mcpPort = *body.MCPPort
-	}
-
-	// 持久化到数据目录的 .env.local：未提交的类目沿用当前生效值
+	// 持久化到数据目录的 .env.local：未提交的类目沿用当前生效值。
+	// 直接写入本次算出的目标值（不读内存），落盘成功后再更新内存，
+	// 避免写盘失败时留下「内存已改、文件未改」的不一致状态
 	url, user, pass := body.URL, body.User, body.Pass
 	if url == "" {
 		url, user, pass = h.rpc.Credentials()
@@ -161,23 +168,39 @@ func (h *Handler) updateSettings(c *gin.Context) {
 	if pollStr == "" {
 		pollStr = h.hub.getPollInterval().String()
 	}
-	var mcpToken string
-	if t := h.mcp.Token.Load(); t != nil {
-		mcpToken = *t
-	}
-	if err := config.SaveLocalSettings(h.dataDir, config.LocalSettings{
+	saved := config.LocalSettings{
 		TransmissionURL:   url,
 		User:              user,
 		Pass:              pass,
 		PollInterval:      pollStr,
-		MCPEnabled:        h.mcp.Enabled.Load(),
-		MCPAllowDelete:    h.mcp.AllowDelete.Load(),
-		MCPAllowDangerous: h.mcp.AllowDangerous.Load(),
-		MCPToken:          mcpToken,
-		MCPPort:           h.mcpPort,
-	}); err != nil {
+		MCPEnabled:        targetEnabled,
+		MCPAllowDelete:    targetAllowDelete,
+		MCPAllowDangerous: targetAllowDangerous,
+		MCPToken:          targetToken,
+		MCPPort:           targetPort,
+	}
+	if err := config.SaveLocalSettings(h.dataDir, saved); err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// 热更新轮询间隔
+	if pollInterval > 0 {
+		h.hub.SetPollInterval(pollInterval)
+	}
+
+	// MCP 开关：落盘成功后统一应用，切换即时生效
+	h.mcp.Enabled.Store(targetEnabled)
+	h.mcp.AllowDelete.Store(targetAllowDelete)
+	h.mcp.AllowDangerous.Store(targetAllowDangerous)
+	if targetToken == "" {
+		h.mcp.Token.Store(nil)
+	} else {
+		t := targetToken
+		h.mcp.Token.Store(&t)
+	}
+	// 端口无法热应用（监听器随进程启动绑定），仅更新内存值供回显，重启后生效
+	h.setMCPPort(targetPort)
+
 	respond(c, gin.H{"updated": true})
 }

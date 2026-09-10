@@ -454,6 +454,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const session = useAppStore((s) => s.session)
   const setSession = useAppStore((s) => s.setSession)
   const setTorrentSites = useAppStore((s) => s.setTorrentSites)
+  const setTorrents = useAppStore((s) => s.setTorrents)
+  const clearSelection = useAppStore((s) => s.clearSelection)
+  const setStorePollInterval = useAppStore((s) => s.setPollInterval)
   const fontSize = useAppStore((s) => s.fontSize)
   const setFontSize = useAppStore((s) => s.setFontSize)
   const singleLine = useAppStore((s) => s.singleLine)
@@ -552,6 +555,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       toast.success(t('toast.updated'))
       setPass('')
       setConnSnapshot({ url: url.trim(), user, pollInterval })
+      // 兜底轮询间隔立即跟随新设置，无需刷新页面
+      setStorePollInterval(pollInterval)
       sessionApi.get().then(setSession).catch(() => setSession(null))
       sessionApi.status().then(setStatus).catch(() => setStatus(null))
     } catch {
@@ -571,7 +576,10 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const patchSession = async (patch: Record<string, unknown>) => {
     try {
       await sessionApi.update(patch)
-      setSession(session ? { ...session, ...patch } : session)
+      // 取 store 里的最新值合并：同一 tick 内连续两次开关时，闭包里的 session
+      // 仍是旧值，直接展开会把前一次改动覆盖掉
+      const latest = useAppStore.getState().session
+      setSession(latest ? { ...latest, ...patch } : latest)
       toast.success(t('toast.updated'))
     } catch {
       // 拦截器已提示
@@ -609,11 +617,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     }
   }
 
-  const saveServers = async (next: ServerInfo[]) => {
-    setServers(next)
+  // 服务器列表改一行就是整表 PUT：逐键直接发请求会形成请求洪水，且乱序返回会把旧列表
+  // 写回服务端；因此本地立即更新、请求按 400ms 防抖，只发最后一次
+  const serverSaveTimer = useRef<number | null>(null)
+  const persistServers = async (next: ServerInfo[]) => {
     try {
-      await serverApi.save(next)
-      toast.success(t('toast.updated'))
+      const res = await serverApi.save(next)
+      if (res?.warning) toast.warning(res.warning)
+      else toast.success(t('toast.updated'))
     } catch {
       // 拦截器已提示。保存被拒时以服务端为准回读，避免本地残留后端没有的幽灵行
       // （幽灵行一删除就是「服务器不存在」）
@@ -626,15 +637,31 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       }
     }
   }
+  const saveServers = (next: ServerInfo[]) => {
+    setServers(next)
+    if (serverSaveTimer.current) window.clearTimeout(serverSaveTimer.current)
+    serverSaveTimer.current = window.setTimeout(() => {
+      serverSaveTimer.current = null
+      void persistServers(next)
+    }, 400)
+  }
 
-  // 删除服务器：走专用接口，后端会同步修正 activeServer 索引
+  // 删除服务器：走专用接口，后端会同步修正 activeServer 索引；若删的是当前服务器
+  // 还会重连到备用服务器，因此这里必须重新拉取数据并清空选区
   const removeServer = async (idx: number) => {
     try {
-      await serverApi.remove(idx)
+      const res = await serverApi.remove(idx)
       const list = await serverApi.list()
       setServers(list.servers)
       setCurrentServerIndex(list.activeServer)
-      toast.success(t('toast.updated'))
+      // 后端可能只完成了部分动作（如删掉后切换备用服务器失败），必须显式告警
+      if (res?.warning) toast.warning(res.warning)
+      else toast.success(t('toast.updated'))
+      clearSelection()
+      torrentApi.list().then(setTorrents).catch(() => {})
+      sessionApi.get().then(setSession).catch(() => setSession(null))
+      sessionApi.status().then(setStatus).catch(() => setStatus(null))
+      torrentApi.sites().then(setTorrentSites).catch(() => {})
     } catch {
       // 拦截器已提示
     }
@@ -644,7 +671,12 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     try {
       const res = await serverApi.switch(idx)
       setCurrentServerIndex(res.index)
-      toast.success(t('common.connected'))
+      if (res.warning) toast.warning(res.warning)
+      else toast.success(t('common.connected'))
+      // 不同服务器的种子 id 空间相互独立：必须清空选区并整表刷新，
+      // 否则上一台的选中 id 会在新服务器上命中同号种子，被批量操作误伤
+      clearSelection()
+      torrentApi.list().then(setTorrents).catch(() => {})
       sessionApi.get().then(setSession).catch(() => setSession(null))
       sessionApi.status().then(setStatus).catch(() => setStatus(null))
       torrentApi.sites().then(setTorrentSites).catch(() => {})
@@ -1154,7 +1186,13 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   <Input
                     type="password"
                     value={server.pass ?? ''}
-                    onChange={(e) => { const s = [...servers]; s[idx] = { ...s[idx], pass: e.target.value }; void saveServers(s) }}
+                    onChange={(e) => {
+                      // pass 为 undefined 表示「未改动，沿用原密码」；一旦输入即为显式设置
+                      const v = e.target.value
+                      const s = [...servers]
+                      s[idx] = { ...s[idx], pass: v, hasPass: v !== '' }
+                      saveServers(s)
+                    }}
                     className="flex-1 h-8 text-footnote"
                     // 列表接口不返回密码，留空表示保持原密码不变
                     placeholder={server.hasPass ? `${t('session.password')} · ${t('session.passwordSaved')}` : t('session.password')}
@@ -1163,7 +1201,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                 </div>
               </div>
             ))}
-            <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => void saveServers([...servers, { name: '', url: '', user: '', pass: '', enabled: true }])}>
+            <Button size="sm" variant="outline" className="w-full h-8 text-footnote" onClick={() => saveServers([...servers, { name: '', url: '', user: '', pass: '', hasPass: false, enabled: true }])}>
               + {t('session.multiServer.addServer')}
             </Button>
             {servers.length > 1 && (

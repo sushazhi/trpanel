@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { torrentApi, sessionApi } from '@/api/torrent'
+import { torrentApi, sessionApi, settingsApi } from '@/api/torrent'
 import { AddTorrent } from '@/components/AddTorrent'
 import { AppUpdatePrompt } from '@/components/AppUpdatePrompt'
 import { AuthTokenDialog } from '@/components/AuthTokenDialog'
@@ -276,6 +276,14 @@ export default function App() {
       .then(setSession)
       .catch(() => setSession(null))
   }, [setSession])
+
+  // 轮询间隔：后端 WS 推流节奏与前端 REST 兜底轮询共用，启动时读一次并同步到 store
+  useEffect(() => {
+    settingsApi
+      .get()
+      .then((s) => useAppStore.getState().setPollInterval(s.pollInterval ?? ''))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (i18n.language) setLanguage(i18n.language.startsWith('zh') ? 'zh' : 'en')

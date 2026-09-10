@@ -512,9 +512,9 @@ export function RemoveTorrentDialog({ open, ids, onClose }: { open: boolean; ids
           return
         }
       }
+      // 失败时不关闭弹窗，让用户可以改条件重试；成功提示由 actions 统一给出
       const ok = await actions.remove(target, deleteData)
       if (!ok) return
-      toast.success(t('toast.removed'))
       onClose()
     } catch {
       // 拦截器已提示
