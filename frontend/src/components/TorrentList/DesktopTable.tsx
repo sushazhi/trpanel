@@ -19,6 +19,7 @@ import { cn, cssVars } from '@/lib/utils'
 import { tagColor } from '@/utils/tagColor'
 import { StatusTag } from '@/components/status/StatusTag'
 import { ProgressBar } from '@/components/TorrentList/ProgressBar'
+import { EmptyList } from '@/components/TorrentList/EmptyList'
 import { buildTorrentMenu, EditModals, FloatingContextMenu, TorrentMenuDropdown } from '@/components/TorrentMenu'
 import { RemoveTorrentDialog, ReplaceTrackerDialog } from '@/components/ToolsDialogs'
 import type { EditMode, EditTarget, MenuItem } from '@/components/TorrentMenu'
@@ -453,12 +454,7 @@ export function DesktopTable({ torrents, onOpenDetail, onOpenBatchClean }: {
   const menuCtx = { actions, t: (k: string) => t(k), onOpenDetail, canRevealPath: can('fs.revealPath'), onEdit: (mode: EditMode, tt: Torrent) => setEditTarget({ torrent: tt, mode }), onOpenBatchClean }
 
   if (sortedTorrents.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-400" style={{ paddingTop: 'var(--pad-top)', paddingBottom: 'var(--pad-bottom)' }}>
-        <AlertCircle className="w-10 h-10 opacity-40" />
-        <span className="text-body">{t('common.empty')}</span>
-      </div>
-    )
+    return <EmptyList />
   }
 
   // 所有列统一固定宽度（名称列默认 320），行尾占位吸收剩余空间

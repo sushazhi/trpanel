@@ -27,10 +27,11 @@ import { useTorrentActions } from '@/hooks/useTorrentActions'
 import { useRevealPath } from '@/hooks/useRevealPath'
 import { useSemanticPath } from '@/hooks/useSemanticPath'
 import { usePlatform } from '@/platform'
-import { useAppStore } from '@/stores/appStore'
+import { hasFilterConditions, useAppStore } from '@/stores/appStore'
 import { DEMO_MODE } from '@/demo'
 import { cn, cssVars } from '@/lib/utils'
 import { tagColor } from '@/utils/tagColor'
+import { translateError } from '@/utils/errorText'
 import { toast } from '@/lib/toast'
 import { copyText } from '@/utils/clipboard'
 import { Button } from '@/components/ui/button'
@@ -97,6 +98,7 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   const search = useAppStore((s) => s.filters.search)
   const filters = useAppStore((s) => s.filters)
   const setFilters = useAppStore((s) => s.setFilters)
+  const clearAllFilters = useAppStore((s) => s.clearAllFilters)
   const selectedIds = useAppStore((s) => s.selectedIds)
   const clearSelection = useAppStore((s) => s.clearSelection)
   const setSelection = useAppStore((s) => s.setSelection)
@@ -118,22 +120,10 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
   const [busy, setBusy] = useState(false)
 
   const hasSelection = selectedIds.length > 0
-  // 与 clearAll 覆盖的条件保持一致：状态 / 站点 / 目录 / 标签 / 错误 / 搜索
-  const hasActiveFilters = useMemo(
-    () => !!(
-      filters.status[0] !== 'all' ||
-      filters.sites.length > 0 ||
-      filters.downloadDirs.length > 0 ||
-      filters.labels.length > 0 ||
-      filters.error.length > 0 ||
-      filters.search
-    ),
-    [filters],
-  )
+  // 与空列表里的「清除全部筛选」用同一判定：状态 / 站点 / 目录 / 标签 / 错误 / 搜索
+  const hasActiveFilters = useMemo(() => hasFilterConditions(filters), [filters])
 
-  const clearAll = () => {
-    setFilters({ status: ['all'], sites: [], downloadDirs: [], labels: [], error: [], search: '' })
-  }
+  const clearAll = clearAllFilters
 
   // 触屏既没有 Ctrl+A 也没有 Shift 连选，这颗按钮是手机端唯一的分组批量入口
   const allFilteredSelected = useMemo(() => {
@@ -410,6 +400,14 @@ export const TopBar: React.FC<Props> = ({ onOpenSettings, onOpenAdd, onOpenDashb
               label={sem(dir)}
               onRemove={() => setFilters({ downloadDirs: filters.downloadDirs.filter((d) => d !== dir) })}
               color="var(--hue-green)"
+            />
+          ))}
+          {filters.error.map((err) => (
+            <FilterChip
+              key={err}
+              label={translateError(err, t)}
+              onRemove={() => setFilters({ error: filters.error.filter((e) => e !== err) })}
+              color="var(--hue-red)"
             />
           ))}
           {filters.search && (

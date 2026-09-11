@@ -54,6 +54,13 @@ function inGroup(f: FilterOptions): boolean {
   )
 }
 
+// 是否存在会改变列表结果的筛选条件（搜索也算，它同样会把列表过滤空）。
+// 空列表时用它区分「确实没有种子」与「被筛选条件过滤掉了」：
+// 后者必须给出清除入口，否则用户只会看到「暂无数据」而无从下手。
+export function hasFilterConditions(f: FilterOptions): boolean {
+  return inGroup(f) || !!f.search
+}
+
 // pruneSelection 剔除选区中已不存在的种子 id。
 // 无变化时返回原数组，避免无谓的重渲染。
 function pruneSelection(selectedIds: number[], torrents: Torrent[]): number[] {
@@ -140,6 +147,7 @@ export interface AppState {
   selectAll: () => void
   clearSelection: () => void
   setFilters: (patch: Partial<FilterOptions>) => void
+  clearAllFilters: () => void
   consumeScrollTarget: () => void
   toggleTheme: () => void
   setTheme: (t: 'light' | 'dark') => void
@@ -261,6 +269,13 @@ export const useAppStore = create<AppState>()(
           return { filters, scrollTargetIds }
         }),
       consumeScrollTarget: () => set({ scrollTargetIds: [] }),
+      // 一键清掉全部筛选条件（保留排序/列宽等展示偏好）。
+      // 筛选条件会被持久化，而「错误分布」这类条件会随种子错误信息变化而失效：
+      // 一旦失效，列表会长期空白且没有任何可见的筛选标记，必须留一条明确的出路。
+      clearAllFilters: () =>
+        set((state) => ({
+          filters: { ...state.filters, status: ['all'], labels: [], sites: [], downloadDirs: [], error: [], search: '' },
+        })),
       toggleTheme: () => set((state) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
       setTheme: (t) => set({ theme: t }),
       setThemePreset: (p) => set({ themePreset: p }),

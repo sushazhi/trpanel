@@ -106,6 +106,13 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
     })
   }
 
+  // 网关部署（APP_BASE 非空，如飞牛的 /app/transmission）下，外部 AI 客户端没有宿主
+  // 登录态：实测 fnOS 1.2.0604 的网关对 /app/** 未携带宿主票据的请求一律短路返回纯文本
+  // "invalid token"（HTTP 200），走网关的 /mcp 根本到不了本服务。因此网关模式必须使用
+  // 直连端口；启用 MCP 却未配置端口时不再展示一个注定连不上的地址与配置，改为提示先填端口。
+  // 未启用 MCP 时不提示——那是尚未开始配置，凭空催促没有意义。
+  const gatewayMode = APP_BASE !== ''
+  const needsDirectPort = gatewayMode && enabled && !mcpPort
   const endpoint = mcpPort
     ? `http://${window.location.hostname}:${mcpPort}/mcp`
     : `${window.location.origin}${APP_BASE}/mcp`
@@ -172,24 +179,35 @@ export function McpManager({ open, onClose }: { open: boolean; onClose: () => vo
             </Row>
           </div>
           <div className="space-y-2.5">
-            <div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-body text-gray-600 dark:text-gray-300">{t('session.mcp.endpoint')}</span>
-                <CopyButton label={t('session.mcp.endpointCopy')} onClick={() => copy(endpoint)} />
-              </div>
-              <p className="tm-mono text-caption1 text-gray-500 dark:text-gray-400 break-all mt-1">{endpoint}</p>
-            </div>
-            <div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-body text-gray-600 dark:text-gray-300">{t('session.mcp.configJson')}</span>
-                <CopyButton label={t('session.mcp.configJsonCopy')} onClick={() => copy(clientConfig)} />
-              </div>
-              <pre className="tm-mono text-caption1 text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-lg p-2.5 break-all whitespace-pre-wrap mt-1.5">
-                {clientConfig}
-              </pre>
-            </div>
-            <p className="text-caption1 text-gray-400">{t('session.mcp.configJsonHint')}</p>
-            <p className="text-caption1 text-gray-400">{t('session.mcp.gatewayHint')}</p>
+            {/* 接入信息只在「MCP 已启用且地址真的可用」时展示：未启用时是尚未开始配置，
+                网关部署缺端口时是注定连不上，两种情况都不该给出可照抄的地址与配置 */}
+            {!enabled ? (
+              <p className="text-caption1 text-gray-400">{t('session.mcp.disabledHint')}</p>
+            ) : needsDirectPort ? (
+              <p className="text-caption1 text-amber-600 dark:text-amber-400">{t('session.mcp.gatewayNeedsPort')}</p>
+            ) : (
+              <>
+                <div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-body text-gray-600 dark:text-gray-300">{t('session.mcp.endpoint')}</span>
+                    <CopyButton label={t('session.mcp.endpointCopy')} onClick={() => copy(endpoint)} />
+                  </div>
+                  <p className="tm-mono text-caption1 text-gray-500 dark:text-gray-400 break-all mt-1">{endpoint}</p>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-body text-gray-600 dark:text-gray-300">{t('session.mcp.configJson')}</span>
+                    <CopyButton label={t('session.mcp.configJsonCopy')} onClick={() => copy(clientConfig)} />
+                  </div>
+                  <pre className="tm-mono text-caption1 text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-lg p-2.5 break-all whitespace-pre-wrap mt-1.5">
+                    {clientConfig}
+                  </pre>
+                </div>
+                <p className="text-caption1 text-gray-400">{t('session.mcp.configJsonHint')}</p>
+                {/* gatewayHint 讲的是网关部署的接入方式：直连部署（Docker 等）下与用户无关，不展示 */}
+                {gatewayMode && <p className="text-caption1 text-gray-400">{t('session.mcp.gatewayHint')}</p>}
+              </>
+            )}
           </div>
         </div>
       </DialogContent>

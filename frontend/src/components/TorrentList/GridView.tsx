@@ -16,6 +16,7 @@ import { copyText } from '@/utils/clipboard'
 import { toast } from '@/lib/toast'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ProgressBar } from '@/components/TorrentList/ProgressBar'
+import { EmptyList } from '@/components/TorrentList/EmptyList'
 import { cn, cssVars } from '@/lib/utils'
 import { MoreVertical } from 'lucide-react'
 import type { Torrent } from '@/types'
@@ -67,7 +68,7 @@ export function GridView({ torrents, onOpenDetail, isMobile, onOpenBatchClean }:
   }, [scrollTargetIds, torrents, consumeScrollTarget])
 
   if (torrents.length === 0) {
-    return <div className="p-8 text-center text-gray-400">{t('common.empty')}</div>
+    return <EmptyList />
   }
 
   const handleSelect = (torrent: Torrent, e: React.MouseEvent) => {

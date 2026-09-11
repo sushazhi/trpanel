@@ -290,6 +290,8 @@
   --hue-purple: #af52de;
   --hue-green: #34c759;
   --hue-orange: #ff9500;
+  /* 错误分布等「异常类」筛选胶囊用：语义上接近状态色，但这里只做区分，不改状态含义 */
+  --hue-red: #ff453a;
 
   --glass-border-light: rgba(255, 255, 255, 0.7);
   --glass-border-dark: rgba(255, 255, 255, 0.12);

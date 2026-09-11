@@ -41,10 +41,22 @@ client.interceptors.response.use(
 // 通用请求助手：解包 ApiResponse
 export async function request<T>(promise: Promise<{ data: ApiResponse<T> }>): Promise<T> {
   const resp = await promise
-  if (resp.data.code !== 0) {
-    const msg = translateApiError(resp.data.message || '请求失败')
+  // 宿主网关在请求未携带有效的宿主登录态时会短路返回 200 + 纯文本（如飞牛的 "invalid token"），
+  // axios 不报错、data 也不是对象；此处显式提示，避免只表现为「列表空白 + 一句笼统的请求失败」而无从排查。
+  const payload: unknown = resp.data
+  if (typeof payload !== 'object' || payload === null) {
+    const raw = typeof payload === 'string' ? payload.trim() : ''
+    const msg = /invalid\s+token/i.test(raw)
+      ? '宿主网关登录态已失效，请重新登录后重开本应用'
+      : '服务返回了非预期内容，请检查服务是否正常运行'
     getMessage()?.error(msg)
     throw new Error(msg)
   }
-  return resp.data.data
+  const body = payload as ApiResponse<T>
+  if (body.code !== 0) {
+    const msg = translateApiError(body.message || '请求失败')
+    getMessage()?.error(msg)
+    throw new Error(msg)
+  }
+  return body.data
 }
