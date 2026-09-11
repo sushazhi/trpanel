@@ -57,35 +57,14 @@ function collectLeaves(n: FileNode): number[] {
   return n.children ? n.children.flatMap(collectLeaves) : [n._i]
 }
 
-// ISO 国家码 → 国旗 emoji（区域指示符）；非法/未知码返回空串
-function isoToFlag(iso: string): string {
-  if (!/^[A-Za-z]{2}$/.test(iso)) return ''
-  return iso.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(127397 + ch.charCodeAt(0)))
-}
-
-let flagEmojiCache: boolean | null = null
-// Windows 字体缺国旗 emoji，会退化渲染成字母对（与国家码重复成 "US US"）；
-// canvas 像素对比探测一次：旗帜与两个字母渲染一致即视为不支持
-function flagEmojiSupported(): boolean {
-  if (flagEmojiCache !== null) return flagEmojiCache
+// ISO 国家码 → 本地化国家名（浏览器内置 Intl.DisplayNames，无需维护 200+ 国家的映射表）
+function countryName(code: string, lang: string): string {
+  if (!/^[A-Za-z]{2}$/.test(code)) return ''
   try {
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = 20
-    // willReadFrequently：消除 Chrome 对连续 getImageData 的性能警告
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    if (!ctx) return (flagEmojiCache = false)
-    ctx.textBaseline = 'top'
-    ctx.font = '16px sans-serif'
-    const draw = (text: string) => {
-      ctx.clearRect(0, 0, 20, 20)
-      ctx.fillText(text, 0, 0)
-      return ctx.getImageData(0, 0, 20, 20).data.join(',')
-    }
-    flagEmojiCache = draw('🇺🇸') !== draw('US')
+    return new Intl.DisplayNames([lang], { type: 'region' }).of(code.toUpperCase()) ?? ''
   } catch {
-    flagEmojiCache = false
+    return ''
   }
-  return flagEmojiCache
 }
 
 // ========== 详情信息网格（替代 antd Descriptions） ==========
@@ -416,7 +395,7 @@ function PiecesView({ torrent }: { torrent: Torrent }) {
 
 // 种子详情（文件/Peers/Trackers）；移动端以底部 Sheet 呈现，桌面端为居中 Dialog
 export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { torrent: Torrent | null; onClose: () => void; onOpenChange?: (open: boolean) => void; isMobile?: boolean }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { can } = usePlatform()
   const revealPath = useRevealPath()
   const sem = useSemanticPath()
@@ -692,10 +671,21 @@ export function TorrentDetail({ torrent, onClose, onOpenChange, isMobile }: { to
       title: t('detail.peerLocation'),
       render: (p) => {
         const code = (geoMap[p.address as string]?.country || '').toUpperCase()
-        const flag = flagEmojiSupported() ? isoToFlag(code) : ''
-        return <span>{flag ? `${flag} ${code}` : code || '-'}</span>
+        // 无归属地（常见于内网出口 / 私有 IP）：与参考实现一致，地球占位
+        if (!/^[A-Z]{2}$/.test(code)) return <span className="text-gray-400">🌐</span>
+        const name = countryName(code, i18n.language)
+        // 自托管 SVG 国旗：Windows 无彩色国旗字体，emoji 会退化成字母
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            <span className={`fi fi-${code.toLowerCase()}`} style={{ width: 20, height: 15 }} />
+            <span>{name || code}</span>
+          </span>
+        )
       },
-      sortValue: (p) => (geoMap[p.address as string]?.country || '').toUpperCase(),
+      sortValue: (p) => {
+        const code = (geoMap[p.address as string]?.country || '').toUpperCase()
+        return countryName(code, i18n.language) || code
+      },
     },
     { key: 'address', title: t('detail.peerAddress'), render: (p) => <span>{(p.address as string) || '-'}</span>, sortValue: (p) => (p.address as string) || '' },
     {

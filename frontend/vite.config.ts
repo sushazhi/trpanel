@@ -2,10 +2,22 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// flag-icons 的 1x1 变体（.fis）本项目用不到，但它的 CSS 为每个国家都引了一份，
+// 会让构建产物凭空多出 271 个无用 SVG（约 1.9MB），文件数也会逼近一些批量删除保护阈值。
+// 在 CSS 处理前剥掉这些规则，只保留 4x3（界面里旗帜按 20×15 展示）。
+const flagIcons4x3Only = {
+  name: 'flag-icons-4x3-only',
+  enforce: 'pre' as const,
+  transform(code: string, id: string) {
+    if (!id.includes('flag-icons') || !id.endsWith('.css')) return null
+    return code.replace(/\.fi-[a-z-]+\.fis\{background-image:url\([^)]*\)\}/g, '')
+  },
+}
+
 export default defineConfig({
   // 相对路径构建：资源可被部署在任意子路径（如 fnOS 网关 /app/transmission/）下
   base: './',
-  plugins: [react(), tailwindcss()],
+  plugins: [flagIcons4x3Only, react(), tailwindcss()],
   resolve: {
     alias: {
       '@': '/src',
@@ -32,6 +44,10 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     chunkSizeWarningLimit: 1500,
+    // flag-icons 的国家/地区旗帜是 271 个独立 SVG（其中 200 个小于默认 4KB 阈值）：
+    // 一旦被内联进 CSS，样式表会膨胀到几百 KB，且未用到的旗帜也被塞进首屏。
+    // 这里对 SVG 关闭内联，CSS 保持 ~27KB，浏览器只按需请求当前页实际出现的旗帜。
+    assetsInlineLimit: (filePath: string) => (filePath.endsWith('.svg') ? false : undefined),
     rollupOptions: {
       output: {
         // Vite 8（rolldown）仅支持函数形式的 manualChunks

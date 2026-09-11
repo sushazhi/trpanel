@@ -836,7 +836,9 @@ export function autoMoveRemove(id: string): void {
 
 // —— 其他 ——
 
-const GEO_POOL = ['United States', 'Japan', 'Germany', 'Singapore', 'France', 'Netherlands', 'China', 'United Kingdom', 'Canada', 'Russia']
+// 与真实后端一致：MaxMind GeoLite2 返回的是 ISO 3166-1 两位代码（如 CN），
+// 此前 demo 返回国家全名，界面无法据此渲染国旗
+const GEO_POOL = ['US', 'JP', 'DE', 'SG', 'FR', 'NL', 'CN', 'GB', 'CA', 'RU']
 
 export function peersGeo(ips: string[]): Record<string, { country: string; city: string }> {
   const out: Record<string, { country: string; city: string }> = {}

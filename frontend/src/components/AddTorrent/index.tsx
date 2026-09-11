@@ -49,7 +49,7 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
   initialText?: string
 }) {
   const { t } = useTranslation()
-  const { can, pickFiles } = usePlatform()
+  const { can, pickFiles, pickFolder } = usePlatform()
   const session = useAppStore((s) => s.session)
 
   const [tab, setTab] = useState<'file' | 'url'>('file')
@@ -449,12 +449,30 @@ export function AddTorrent({ open, onClose, initialFiles, initialText }: {
           )}
 
           <div className="space-y-2">
-            <Input
-              placeholder={t('addTorrent.downloadDir')}
-              value={downloadDir}
-              onChange={(e) => setDownloadDir(e.target.value)}
-              list="tm-dir-history"
-            />
+            <div className="flex gap-2">
+              <Input
+                placeholder={t('addTorrent.downloadDir')}
+                value={downloadDir}
+                onChange={(e) => setDownloadDir(e.target.value)}
+                list="tm-dir-history"
+                className="flex-1 min-w-0"
+              />
+              {/* 宿主目录选择器：仅飞牛环境显示，浏览器 / 演示环境自动隐藏，仍可手输 */}
+              {can('fs.pickFolder') && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={async () => {
+                    const p = await pickFolder()
+                    if (p) setDownloadDir(p)
+                  }}
+                >
+                  <FolderOpen className="w-4 h-4 mr-1.5" />
+                  {t('action.selectDir')}
+                </Button>
+              )}
+            </div>
             <datalist id="tm-dir-history">
               {dirHistory.map((d) => <option key={d} value={d} />)}
             </datalist>
